@@ -1,0 +1,346 @@
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
+import { formatCurrency, formatDate, getCurrentMonth, getMonthLabel, getLastDayOfMonth } from "@/lib/utils";
+import {
+  Plus,
+  Trash2,
+  ArrowUpRight,
+  ArrowDownRight,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import type { Transaction, Category } from "@shared/schema";
+
+export default function Transacoes() {
+  const { toast } = useToast();
+  const [month, setMonth] = useState(getCurrentMonth());
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    description: "",
+    amount: "",
+    type: "despesa" as "receita" | "despesa",
+    categoryId: "",
+    date: new Date().toISOString().slice(0, 10),
+  });
+
+  const startDate = `${month}-01`;
+  const endDate = getLastDayOfMonth(month);
+
+  const { data: transactions = [], isLoading } = useQuery<Transaction[]>({
+    queryKey: ["/api/transactions", month],
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/transactions?startDate=${startDate}&endDate=${endDate}`
+      );
+      return res.json();
+    },
+  });
+
+  const { data: categories = [] } = useQuery<Category[]>({
+    queryKey: ["/api/categories"],
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: typeof form) => {
+      const res = await apiRequest("POST", "/api/transactions", {
+        description: data.description,
+        amount: parseFloat(data.amount),
+        type: data.type,
+        categoryId: data.categoryId ? parseInt(data.categoryId) : null,
+        date: data.date,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+      setOpen(false);
+      setForm({
+        description: "",
+        amount: "",
+        type: "despesa",
+        categoryId: "",
+        date: new Date().toISOString().slice(0, 10),
+      });
+      toast({ title: "Transação registrada" });
+    },
+    onError: () => {
+      toast({ title: "Erro ao registrar", variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/transactions/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+      toast({ title: "Transação removida" });
+    },
+  });
+
+  const filteredCategories = categories.filter(
+    (c) => c.type === form.type || c.type === "ambos"
+  );
+
+  const navigateMonth = (dir: number) => {
+    const [y, m] = month.split("-").map(Number);
+    const d = new Date(y, m - 1 + dir);
+    setMonth(d.toISOString().slice(0, 7));
+  };
+
+  const receitas = transactions
+    .filter((t) => t.type === "receita")
+    .reduce((s, t) => s + t.amount, 0);
+  const despesas = transactions
+    .filter((t) => t.type === "despesa")
+    .reduce((s, t) => s + t.amount, 0);
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-xl font-bold" data-testid="text-transacoes-title">
+            Transações
+          </h2>
+          <div className="flex items-center gap-2 mt-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigateMonth(-1)}
+              data-testid="button-prev-month"
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <span className="text-sm text-muted-foreground capitalize min-w-[140px] text-center">
+              {getMonthLabel(month)}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigateMonth(1)}
+              data-testid="button-next-month"
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        </div>
+
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button data-testid="button-add-transaction">
+              <Plus className="size-4 mr-1.5" />
+              Nova Transação
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Nova Transação</DialogTitle>
+            </DialogHeader>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!form.description || !form.amount) return;
+                createMutation.mutate(form);
+              }}
+              className="space-y-4"
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Tipo</Label>
+                  <Select
+                    value={form.type}
+                    onValueChange={(v) =>
+                      setForm({ ...form, type: v as "receita" | "despesa", categoryId: "" })
+                    }
+                  >
+                    <SelectTrigger data-testid="select-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="receita">Receita</SelectItem>
+                      <SelectItem value="despesa">Despesa</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Data</Label>
+                  <Input
+                    type="date"
+                    value={form.date}
+                    onChange={(e) => setForm({ ...form, date: e.target.value })}
+                    data-testid="input-date"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Descrição</Label>
+                <Input
+                  placeholder="Ex: Supermercado"
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  data-testid="input-description"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Valor (R$)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    placeholder="0,00"
+                    value={form.amount}
+                    onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                    data-testid="input-amount"
+                  />
+                </div>
+                <div>
+                  <Label>Categoria</Label>
+                  <Select
+                    value={form.categoryId}
+                    onValueChange={(v) => setForm({ ...form, categoryId: v })}
+                  >
+                    <SelectTrigger data-testid="select-category">
+                      <SelectValue placeholder="Selecione" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredCategories.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={createMutation.isPending}
+                data-testid="button-submit-transaction"
+              >
+                {createMutation.isPending ? "Salvando..." : "Registrar"}
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground">Receitas</p>
+            <p className="text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+              {formatCurrency(receitas)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground">Despesas</p>
+            <p className="text-lg font-bold tabular-nums text-red-600 dark:text-red-400">
+              {formatCurrency(despesas)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground">Saldo do Mês</p>
+            <p
+              className={`text-lg font-bold tabular-nums ${receitas - despesas >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+            >
+              {formatCurrency(receitas - despesas)}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Transaction list */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-semibold">
+            {transactions.length} {transactions.length === 1 ? "transação" : "transações"} no mês
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
+          ) : transactions.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">
+              Nenhuma transação neste mês
+            </p>
+          ) : (
+            <div className="divide-y">
+              {transactions.map((tx) => {
+                const cat = categories.find((c) => c.id === tx.categoryId);
+                return (
+                  <div
+                    key={tx.id}
+                    className="flex items-center justify-between gap-3 py-3"
+                    data-testid={`row-transaction-${tx.id}`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`size-9 rounded-md flex items-center justify-center shrink-0 ${tx.type === "receita" ? "bg-emerald-100 dark:bg-emerald-900/30" : "bg-red-100 dark:bg-red-900/30"}`}
+                      >
+                        {tx.type === "receita" ? (
+                          <ArrowUpRight className="size-4 text-emerald-600 dark:text-emerald-400" />
+                        ) : (
+                          <ArrowDownRight className="size-4 text-red-600 dark:text-red-400" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{tx.description}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {cat?.name || "Outros"} · {formatDate(tx.date)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span
+                        className={`text-sm font-semibold tabular-nums ${tx.type === "receita" ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+                      >
+                        {tx.type === "receita" ? "+" : "-"}
+                        {formatCurrency(tx.amount)}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => deleteMutation.mutate(tx.id)}
+                        data-testid={`button-delete-${tx.id}`}
+                      >
+                        <Trash2 className="size-3.5 text-muted-foreground" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
