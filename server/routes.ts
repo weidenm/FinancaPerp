@@ -1,13 +1,17 @@
 import type { Express } from "express";
-import { createServer, type Server } from "http";
+import type { Server } from "http";
 import { storage } from "./storage";
 import { insertTransactionSchema, insertCategorySchema, insertBudgetSchema, insertGoalSchema } from "@shared/schema";
 import { z } from "zod";
+import { registerImportRoutes } from "./api/imports";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // ─── Ledger imports (bank statement + card invoice) ────────────
+  registerImportRoutes(app);
 
   // ─── Categories ───────────────────────────────
   app.get("/api/categories", async (_req, res) => {
