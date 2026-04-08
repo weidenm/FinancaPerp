@@ -4,12 +4,8 @@ import {
   type Budget, type InsertBudget, budgets,
   type Goal, type InsertGoal, goals,
 } from "@shared/schema";
-import { drizzle } from "drizzle-orm/libsql";
-import { createClient } from "@libsql/client";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
-
-const libsql = createClient({ url: "file:./data.db" });
-export const db = drizzle(libsql);
+import { db } from "./infra/db";
 
 export interface IStorage {
   // Categories

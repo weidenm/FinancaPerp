@@ -66,3 +66,119 @@ export const insertGoalSchema = createInsertSchema(goals).omit({ id: true }).ext
 });
 export type InsertGoal = z.infer<typeof insertGoalSchema>;
 export type Goal = typeof goals.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ledger import + normalization (canonical signed amounts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const accounts = sqliteTable("accounts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  type: text("type", { enum: ["checking", "savings", "credit_card"] })
+    .notNull(),
+  connectorId: text("connector_id").notNull(),
+  signConvention: text("sign_convention", { enum: ["natural", "inverted"] })
+    .notNull()
+    .default("natural"),
+  currency: text("currency").notNull().default("BRL"),
+});
+
+export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true }).extend({
+  name: z.string().min(1, "Nome obrigatório"),
+  connectorId: z.string().min(1, "Connector obrigatório"),
+});
+export type InsertAccount = z.infer<typeof insertAccountSchema>;
+export type Account = typeof accounts.$inferSelect;
+
+export const imports = sqliteTable("imports", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  createdAt: text("created_at").notNull(),
+  accountId: integer("account_id").notNull().references(() => accounts.id),
+  sourceKind: text("source_kind", { enum: ["statement", "card_invoice"] }).notNull(),
+  connectorId: text("connector_id").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  ruleVersion: text("rule_version").notNull(),
+  status: text("status", { enum: ["parsed", "needs_review", "committed", "failed"] })
+    .notNull()
+    .default("parsed"),
+});
+
+export const insertImportSchema = createInsertSchema(imports).omit({ id: true }).extend({
+  createdAt: z.string().min(1),
+  idempotencyKey: z.string().min(1),
+  ruleVersion: z.string().min(1),
+});
+export type InsertImport = z.infer<typeof insertImportSchema>;
+export type Import = typeof imports.$inferSelect;
+
+export const importFiles = sqliteTable("import_files", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  importId: integer("import_id").notNull().references(() => imports.id),
+  originalName: text("original_name").notNull(),
+  mime: text("mime").notNull(),
+  sha256: text("sha256").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+});
+export const insertImportFileSchema = createInsertSchema(importFiles).omit({ id: true });
+export type InsertImportFile = z.infer<typeof insertImportFileSchema>;
+export type ImportFile = typeof importFiles.$inferSelect;
+
+export const rawTransactions = sqliteTable("raw_transactions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  importId: integer("import_id").notNull().references(() => imports.id),
+  externalId: text("external_id"),
+  postedAt: text("posted_at").notNull(),
+  descriptionRaw: text("description_raw").notNull(),
+  transactionCode: text("transaction_code"),
+  amountRaw: text("amount_raw").notNull(),
+  amountRawSignHint: text("amount_raw_sign_hint", { enum: ["positive", "negative", "unknown"] })
+    .notNull()
+    .default("unknown"),
+  metadataJson: text("metadata_json").notNull().default("{}"),
+});
+export const insertRawTransactionSchema = createInsertSchema(rawTransactions).omit({ id: true });
+export type InsertRawTransaction = z.infer<typeof insertRawTransactionSchema>;
+export type RawTransaction = typeof rawTransactions.$inferSelect;
+
+export const ledgerTransactions = sqliteTable("ledger_transactions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  importId: integer("import_id").notNull().references(() => imports.id),
+  accountId: integer("account_id").notNull().references(() => accounts.id),
+  postedAt: text("posted_at").notNull(),
+  descriptionNormalized: text("description_normalized").notNull(),
+  amountRaw: text("amount_raw").notNull(),
+  amountNormalized: real("amount_normalized").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  kind: text("kind", { enum: ["purchase", "payment", "refund", "transfer", "fee", "interest", "other"] })
+    .notNull()
+    .default("other"),
+  affectsIncomeExpense: integer("affects_income_expense", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  transferGroupId: text("transfer_group_id"),
+  duplicateOfId: integer("duplicate_of_id").references((): any => ledgerTransactions.id),
+  confidence: real("confidence").notNull().default(0.5),
+  ruleVersion: text("rule_version").notNull(),
+  auditJson: text("audit_json").notNull().default("{}"),
+  needsReview: integer("needs_review", { mode: "boolean" }).notNull().default(false),
+  reviewNotes: text("review_notes"),
+  updatedAt: text("updated_at").notNull(),
+});
+export const insertLedgerTransactionSchema = createInsertSchema(ledgerTransactions).omit({ id: true }).extend({
+  amountNormalized: z.number(),
+});
+export type InsertLedgerTransaction = z.infer<typeof insertLedgerTransactionSchema>;
+export type LedgerTransaction = typeof ledgerTransactions.$inferSelect;
+
+export const ledgerAuditEvents = sqliteTable("ledger_audit_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  entity: text("entity").notNull(),
+  entityId: integer("entity_id").notNull(),
+  at: text("at").notNull(),
+  actor: text("actor", { enum: ["system", "user"] }).notNull().default("system"),
+  event: text("event").notNull(),
+  diffJson: text("diff_json").notNull().default("{}"),
+});
+export const insertLedgerAuditEventSchema = createInsertSchema(ledgerAuditEvents).omit({ id: true });
+export type InsertLedgerAuditEvent = z.infer<typeof insertLedgerAuditEventSchema>;
+export type LedgerAuditEvent = typeof ledgerAuditEvents.$inferSelect;
