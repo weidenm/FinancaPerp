@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { insertTransactionSchema, insertCategorySchema, insertBudgetSchema, insertGoalSchema } from "@shared/schema";
 import { z } from "zod";
 import { registerImportRoutes } from "./api/imports";
+import { registerAccountRoutes } from "./api/accounts";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -11,6 +12,7 @@ export async function registerRoutes(
 ): Promise<Server> {
 
   // ─── Ledger imports (bank statement + card invoice) ────────────
+  registerAccountRoutes(app);
   registerImportRoutes(app);
 
   // ─── Categories ───────────────────────────────
