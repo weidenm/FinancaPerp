@@ -29,7 +29,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import type { Transaction, Category } from "@shared/schema";
+import type { Transaction, Category, Account } from "@shared/schema";
 
 export default function Transacoes() {
   const { toast } = useToast();
@@ -41,6 +41,11 @@ export default function Transacoes() {
     connectorId: "generic_csv",
     sourceKind: "statement" as "statement" | "card_invoice",
     files: null as FileList | null,
+  });
+  const [showNewAccountOnImport, setShowNewAccountOnImport] = useState(false);
+  const [newAccountOnImport, setNewAccountOnImport] = useState({
+    name: "",
+    type: "checking" as "checking" | "savings" | "credit_card",
   });
   const [form, setForm] = useState({
     description: "",
@@ -68,8 +73,32 @@ export default function Transacoes() {
     queryKey: ["/api/categories"],
   });
 
-  const { data: accounts = [] } = useQuery<any[]>({
+  const { data: accounts = [] } = useQuery<Account[]>({
     queryKey: ["/api/accounts"],
+  });
+
+  const createAccountFromImportMutation = useMutation({
+    mutationFn: async () => {
+      const connectorId = importForm.connectorId.trim() || "generic_csv";
+      const res = await apiRequest("POST", "/api/accounts", {
+        name: newAccountOnImport.name.trim(),
+        type: newAccountOnImport.type,
+        connectorId,
+        signConvention: "natural",
+        currency: "BRL",
+      });
+      return res.json() as Promise<Account>;
+    },
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
+      setImportForm((prev) => ({ ...prev, accountId: String(created.id) }));
+      setNewAccountOnImport({ name: "", type: "checking" });
+      setShowNewAccountOnImport(false);
+      toast({ title: "Conta criada", description: created.name });
+    },
+    onError: () => {
+      toast({ title: "Erro ao criar conta", variant: "destructive" });
+    },
   });
 
   const createMutation = useMutation({
@@ -184,7 +213,16 @@ export default function Transacoes() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Dialog open={openImport} onOpenChange={setOpenImport}>
+          <Dialog
+            open={openImport}
+            onOpenChange={(o) => {
+              setOpenImport(o);
+              if (!o) {
+                setShowNewAccountOnImport(false);
+                setNewAccountOnImport({ name: "", type: "checking" });
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button variant="secondary" data-testid="button-import-transactions">
                 Importar
@@ -201,13 +239,25 @@ export default function Transacoes() {
                 }}
                 className="space-y-4"
               >
-                <div>
-                  <Label>Conta</Label>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="shrink-0">Conta</Label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => setShowNewAccountOnImport((v) => !v)}
+                      data-testid="button-toggle-new-account-import"
+                    >
+                      {showNewAccountOnImport ? "Fechar" : "Nova conta"}
+                    </Button>
+                  </div>
                   <Select
                     value={importForm.accountId}
                     onValueChange={(v) => setImportForm({ ...importForm, accountId: v })}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger data-testid="select-import-account">
                       <SelectValue placeholder="Selecione" />
                     </SelectTrigger>
                     <SelectContent>
@@ -218,9 +268,61 @@ export default function Transacoes() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {accounts.length === 0 ? (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Nenhuma conta cadastrada. Crie via `POST /api/accounts`.
+                  {showNewAccountOnImport ? (
+                    <div className="rounded-md border p-3 space-y-3 bg-muted/30">
+                      <p className="text-xs text-muted-foreground">
+                        O connector da nova conta será o mesmo informado abaixo neste formulário.
+                      </p>
+                      <div>
+                        <Label className="text-xs">Nome da conta</Label>
+                        <Input
+                          className="mt-1"
+                          value={newAccountOnImport.name}
+                          onChange={(e) =>
+                            setNewAccountOnImport({ ...newAccountOnImport, name: e.target.value })
+                          }
+                          placeholder="Ex: Itaú Corrente"
+                          data-testid="input-new-account-name-import"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Tipo</Label>
+                        <Select
+                          value={newAccountOnImport.type}
+                          onValueChange={(v) =>
+                            setNewAccountOnImport({
+                              ...newAccountOnImport,
+                              type: v as "checking" | "savings" | "credit_card",
+                            })
+                          }
+                        >
+                          <SelectTrigger className="mt-1" data-testid="select-new-account-type-import">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="checking">Conta corrente</SelectItem>
+                            <SelectItem value="savings">Poupança</SelectItem>
+                            <SelectItem value="credit_card">Cartão de crédito</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full"
+                        disabled={
+                          createAccountFromImportMutation.isPending || !newAccountOnImport.name.trim()
+                        }
+                        onClick={() => createAccountFromImportMutation.mutate()}
+                        data-testid="button-create-account-import"
+                      >
+                        {createAccountFromImportMutation.isPending ? "Criando..." : "Criar e selecionar"}
+                      </Button>
+                    </div>
+                  ) : null}
+                  {accounts.length === 0 && !showNewAccountOnImport ? (
+                    <p className="text-xs text-muted-foreground">
+                      Nenhuma conta cadastrada. Use &quot;Nova conta&quot; acima ou cadastre em outro lugar.
                     </p>
                   ) : null}
                 </div>
