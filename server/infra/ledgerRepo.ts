@@ -140,16 +140,16 @@ export async function commitLedgerToAppTransactions(params: { importId: number }
     .where(
       and(
         eq(ledgerTransactions.importId, params.importId),
-        eq(ledgerTransactions.needsReview, false),
         isNull(ledgerTransactions.duplicateOfId),
         eq(ledgerTransactions.affectsIncomeExpense, true),
       ),
     )
     .all();
 
-  if (rows.length === 0) return { created: 0 };
+  const withValue = rows.filter((t) => Math.abs(t.amountNormalized) > 1e-9);
+  if (withValue.length === 0) return { created: 0 };
 
-  const inserts = rows.map((t) => {
+  const inserts = withValue.map((t) => {
     const isIncome = t.amountNormalized > 0;
     return {
       description: t.descriptionNormalized,

@@ -40,7 +40,8 @@ function buildIdempotencyKey(input: Record<string, unknown>): string {
 
 const createImportBodySchema = z.object({
   accountId: z.coerce.number().int().positive(),
-  connectorId: z.string().min(1),
+  /** Opcional: se omitido ou vazio, usa o da conta e por último `generic_csv`. */
+  connectorId: z.string().optional(),
   sourceKind: z.enum(["statement", "card_invoice"]),
   ruleVersion: z.string().min(1).optional().default(LEDGER_RULE_VERSION_V1),
 });
@@ -79,6 +80,11 @@ export function registerImportRoutes(app: Express) {
     const account = await getAccount(parsed.data.accountId);
     if (!account) return res.status(404).json({ error: "Account not found" });
 
+    const connectorId =
+      (parsed.data.connectorId && String(parsed.data.connectorId).trim()) ||
+      account.connectorId ||
+      "generic_csv";
+
     const fileDigests = files.map((f) => ({
       originalName: f.originalname,
       mime: f.mimetype,
@@ -88,7 +94,7 @@ export function registerImportRoutes(app: Express) {
 
     const idempotencyKey = buildIdempotencyKey({
       accountId: parsed.data.accountId,
-      connectorId: parsed.data.connectorId,
+      connectorId,
       sourceKind: parsed.data.sourceKind,
       ruleVersion: parsed.data.ruleVersion,
       files: fileDigests.map((f) => f.sha256).sort(),
@@ -113,7 +119,7 @@ export function registerImportRoutes(app: Express) {
       createdAt: new Date().toISOString(),
       accountId: parsed.data.accountId,
       sourceKind: parsed.data.sourceKind,
-      connectorId: parsed.data.connectorId,
+      connectorId,
       idempotencyKey,
       ruleVersion: parsed.data.ruleVersion,
       status: "parsed",
@@ -130,7 +136,7 @@ export function registerImportRoutes(app: Express) {
     await insertImportFiles(importRow.id, fileDigests);
 
     const docs = await parseUploadToRawDocuments(files);
-    const candidates = mapDocumentsToCandidates({ connectorId: parsed.data.connectorId, docs });
+    const candidates = mapDocumentsToCandidates({ connectorId, docs });
 
     const rawRows = candidates.map((c) => ({
       importId: importRow.id,
@@ -146,7 +152,7 @@ export function registerImportRoutes(app: Express) {
 
     const normalized = normalizeCandidatesV1({
       accountId: account.id,
-      connectorId: parsed.data.connectorId,
+      connectorId,
       accountType: account.type,
       signConvention: account.signConvention,
       sourceKind: parsed.data.sourceKind,
@@ -332,6 +338,10 @@ export function registerImportRoutes(app: Express) {
     const importId = Number(req.params.id);
     const imp = await getImport(importId);
     if (!imp) return res.status(404).json({ error: "Import not found" });
+
+    if (imp.status === "committed") {
+      return res.json({ importId, created: 0, alreadyCommitted: true });
+    }
 
     const result = await commitLedgerToAppTransactions({ importId });
     await markImportStatus(importId, "committed");

@@ -29,7 +29,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import type { Transaction, Category } from "@shared/schema";
+import type { Transaction, Category, Account } from "@shared/schema";
 
 export default function Transacoes() {
   const { toast } = useToast();
@@ -38,9 +38,13 @@ export default function Transacoes() {
   const [openImport, setOpenImport] = useState(false);
   const [importForm, setImportForm] = useState({
     accountId: "",
-    connectorId: "generic_csv",
     sourceKind: "statement" as "statement" | "card_invoice",
     files: null as FileList | null,
+  });
+  const [showNewAccountOnImport, setShowNewAccountOnImport] = useState(false);
+  const [newAccountOnImport, setNewAccountOnImport] = useState({
+    name: "",
+    type: "checking" as "checking" | "savings" | "credit_card",
   });
   const [form, setForm] = useState({
     description: "",
@@ -68,8 +72,31 @@ export default function Transacoes() {
     queryKey: ["/api/categories"],
   });
 
-  const { data: accounts = [] } = useQuery<any[]>({
+  const { data: accounts = [] } = useQuery<Account[]>({
     queryKey: ["/api/accounts"],
+  });
+
+  const createAccountFromImportMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/accounts", {
+        name: newAccountOnImport.name.trim(),
+        type: newAccountOnImport.type,
+        connectorId: "generic_csv",
+        signConvention: "natural",
+        currency: "BRL",
+      });
+      return res.json() as Promise<Account>;
+    },
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
+      setImportForm((prev) => ({ ...prev, accountId: String(created.id) }));
+      setNewAccountOnImport({ name: "", type: "checking" });
+      setShowNewAccountOnImport(false);
+      toast({ title: "Conta criada", description: created.name });
+    },
+    onError: () => {
+      toast({ title: "Erro ao criar conta", variant: "destructive" });
+    },
   });
 
   const createMutation = useMutation({
@@ -117,18 +144,42 @@ export default function Transacoes() {
       }
       const fd = new FormData();
       fd.append("accountId", importForm.accountId);
-      fd.append("connectorId", importForm.connectorId);
       fd.append("sourceKind", importForm.sourceKind);
       for (const f of Array.from(importForm.files)) fd.append("files", f);
       const res = await apiRequestFormData("POST", "/api/imports", fd);
-      return res.json();
+      const data = (await res.json()) as {
+        importId?: number;
+        counts?: { raw?: number; ledger?: number; needsReview?: number };
+      };
+      const importId = data.importId;
+      if (importId == null) throw new Error("Resposta inválida do servidor (sem importId).");
+      const commitRes = await apiRequest("POST", `/api/imports/${importId}/commit`);
+      const commit = (await commitRes.json()) as {
+        created?: number;
+        alreadyCommitted?: boolean;
+      };
+      return { import: data, commit };
     },
-    onSuccess: (data: any) => {
+    onSuccess: ({ import: data, commit }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
       setOpenImport(false);
-      setImportForm({ accountId: "", connectorId: "generic_csv", sourceKind: "statement", files: null });
+      setImportForm({ accountId: "", sourceKind: "statement", files: null });
+      const raw = data?.counts?.raw ?? 0;
+      const ledger = data?.counts?.ledger ?? 0;
+      const needsReview = data?.counts?.needsReview ?? 0;
+      const created = commit?.created ?? 0;
+      const already = commit?.alreadyCommitted === true;
       toast({
-        title: "Importação concluída",
-        description: `Raw: ${data?.counts?.raw ?? 0} · Ledger: ${data?.counts?.ledger ?? 0} · Revisão: ${data?.counts?.needsReview ?? 0}`,
+        title: already ? "Importação já processada" : "Importação concluída",
+        description: [
+          `Linhas no arquivo: ${raw} · Normalizadas: ${ledger}`,
+          needsReview ? `Com alerta de revisão: ${needsReview}` : null,
+          already
+            ? "Lançamentos já estavam gravados na lista."
+            : `Novas transações na lista: ${created} (use o mês da data de cada lançamento para vê-las).`,
+        ]
+          .filter(Boolean)
+          .join(" · "),
       });
     },
     onError: (e: any) => {
@@ -184,7 +235,17 @@ export default function Transacoes() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Dialog open={openImport} onOpenChange={setOpenImport}>
+          <Dialog
+            open={openImport}
+            onOpenChange={(o) => {
+              setOpenImport(o);
+              if (!o) {
+                setShowNewAccountOnImport(false);
+                setNewAccountOnImport({ name: "", type: "checking" });
+                setImportForm({ accountId: "", sourceKind: "statement", files: null });
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button variant="secondary" data-testid="button-import-transactions">
                 Importar
@@ -201,13 +262,25 @@ export default function Transacoes() {
                 }}
                 className="space-y-4"
               >
-                <div>
-                  <Label>Conta</Label>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="shrink-0">Conta</Label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => setShowNewAccountOnImport((v) => !v)}
+                      data-testid="button-toggle-new-account-import"
+                    >
+                      {showNewAccountOnImport ? "Fechar" : "Nova conta"}
+                    </Button>
+                  </div>
                   <Select
                     value={importForm.accountId}
                     onValueChange={(v) => setImportForm({ ...importForm, accountId: v })}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger data-testid="select-import-account">
                       <SelectValue placeholder="Selecione" />
                     </SelectTrigger>
                     <SelectContent>
@@ -218,41 +291,84 @@ export default function Transacoes() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {accounts.length === 0 ? (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Nenhuma conta cadastrada. Crie via `POST /api/accounts`.
+                  {showNewAccountOnImport ? (
+                    <div className="rounded-md border p-3 space-y-3 bg-muted/30">
+                      <p className="text-xs text-muted-foreground">
+                        A conta usa o formato padrão de arquivos (CSV, OFX, Excel, etc.).
+                      </p>
+                      <div>
+                        <Label className="text-xs">Nome da conta</Label>
+                        <Input
+                          className="mt-1"
+                          value={newAccountOnImport.name}
+                          onChange={(e) =>
+                            setNewAccountOnImport({ ...newAccountOnImport, name: e.target.value })
+                          }
+                          placeholder="Ex: Itaú Corrente"
+                          data-testid="input-new-account-name-import"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Tipo</Label>
+                        <Select
+                          value={newAccountOnImport.type}
+                          onValueChange={(v) =>
+                            setNewAccountOnImport({
+                              ...newAccountOnImport,
+                              type: v as "checking" | "savings" | "credit_card",
+                            })
+                          }
+                        >
+                          <SelectTrigger className="mt-1" data-testid="select-new-account-type-import">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="checking">Conta corrente</SelectItem>
+                            <SelectItem value="savings">Poupança</SelectItem>
+                            <SelectItem value="credit_card">Cartão de crédito</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full"
+                        disabled={
+                          createAccountFromImportMutation.isPending || !newAccountOnImport.name.trim()
+                        }
+                        onClick={() => createAccountFromImportMutation.mutate()}
+                        data-testid="button-create-account-import"
+                      >
+                        {createAccountFromImportMutation.isPending ? "Criando..." : "Criar e selecionar"}
+                      </Button>
+                    </div>
+                  ) : null}
+                  {accounts.length === 0 && !showNewAccountOnImport ? (
+                    <p className="text-xs text-muted-foreground">
+                      Nenhuma conta cadastrada. Use &quot;Nova conta&quot; acima ou cadastre em outro lugar.
                     </p>
                   ) : null}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Fonte</Label>
-                    <Select
-                      value={importForm.sourceKind}
-                      onValueChange={(v) =>
-                        setImportForm({ ...importForm, sourceKind: v as any })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="statement">Extrato</SelectItem>
-                        <SelectItem value="card_invoice">Fatura Cartão</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Connector</Label>
-                    <Input
-                      value={importForm.connectorId}
-                      onChange={(e) =>
-                        setImportForm({ ...importForm, connectorId: e.target.value })
-                      }
-                      placeholder="generic_csv"
-                    />
-                  </div>
+                <div>
+                  <Label>Fonte do arquivo</Label>
+                  <Select
+                    value={importForm.sourceKind}
+                    onValueChange={(v) =>
+                      setImportForm({ ...importForm, sourceKind: v as "statement" | "card_invoice" })
+                    }
+                  >
+                    <SelectTrigger data-testid="select-import-source-kind">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="statement">Extrato (conta corrente / poupança)</SelectItem>
+                      <SelectItem value="card_invoice">Fatura de cartão de crédito</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    O tipo de arquivo (CSV, OFX, Excel…) é detectado automaticamente.
+                  </p>
                 </div>
 
                 <div>
@@ -263,7 +379,8 @@ export default function Transacoes() {
                     onChange={(e) => setImportForm({ ...importForm, files: e.target.files })}
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    Suporta CSV, XLSX, OFX, PDF, TXT e imagens (OCR).
+                    Suporta CSV, XLSX, OFX, PDF, TXT e imagens (OCR). Lançamentos classificados como
+                    receita ou despesa entram na lista; transferências e pagamento de fatura não.
                   </p>
                 </div>
 
