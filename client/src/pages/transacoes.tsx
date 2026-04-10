@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestFormData } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,13 @@ export default function Transacoes() {
   const { toast } = useToast();
   const [month, setMonth] = useState(getCurrentMonth());
   const [open, setOpen] = useState(false);
+  const [openImport, setOpenImport] = useState(false);
+  const [importForm, setImportForm] = useState({
+    accountId: "",
+    connectorId: "generic_csv",
+    sourceKind: "statement" as "statement" | "card_invoice",
+    files: null as FileList | null,
+  });
   const [form, setForm] = useState({
     description: "",
     amount: "",
@@ -59,6 +66,10 @@ export default function Transacoes() {
 
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
+  });
+
+  const { data: accounts = [] } = useQuery<any[]>({
+    queryKey: ["/api/accounts"],
   });
 
   const createMutation = useMutation({
@@ -96,6 +107,32 @@ export default function Transacoes() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
       toast({ title: "Transação removida" });
+    },
+  });
+
+  const importMutation = useMutation({
+    mutationFn: async () => {
+      if (!importForm.accountId || !importForm.files || importForm.files.length === 0) {
+        throw new Error("Selecione a conta e ao menos um arquivo");
+      }
+      const fd = new FormData();
+      fd.append("accountId", importForm.accountId);
+      fd.append("connectorId", importForm.connectorId);
+      fd.append("sourceKind", importForm.sourceKind);
+      for (const f of Array.from(importForm.files)) fd.append("files", f);
+      const res = await apiRequestFormData("POST", "/api/imports", fd);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      setOpenImport(false);
+      setImportForm({ accountId: "", connectorId: "generic_csv", sourceKind: "statement", files: null });
+      toast({
+        title: "Importação concluída",
+        description: `Raw: ${data?.counts?.raw ?? 0} · Ledger: ${data?.counts?.ledger ?? 0} · Revisão: ${data?.counts?.needsReview ?? 0}`,
+      });
+    },
+    onError: (e: any) => {
+      toast({ title: "Erro ao importar", description: String(e?.message || ""), variant: "destructive" });
     },
   });
 
@@ -146,105 +183,197 @@ export default function Transacoes() {
           </div>
         </div>
 
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-add-transaction">
-              <Plus className="size-4 mr-1.5" />
-              Nova Transação
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Nova Transação</DialogTitle>
-            </DialogHeader>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!form.description || !form.amount) return;
-                createMutation.mutate(form);
-              }}
-              className="space-y-4"
-            >
-              <div className="grid grid-cols-2 gap-3">
+        <div className="flex items-center gap-2">
+          <Dialog open={openImport} onOpenChange={setOpenImport}>
+            <DialogTrigger asChild>
+              <Button variant="secondary" data-testid="button-import-transactions">
+                Importar
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Importar arquivos</DialogTitle>
+              </DialogHeader>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  importMutation.mutate();
+                }}
+                className="space-y-4"
+              >
                 <div>
-                  <Label>Tipo</Label>
+                  <Label>Conta</Label>
                   <Select
-                    value={form.type}
-                    onValueChange={(v) =>
-                      setForm({ ...form, type: v as "receita" | "despesa", categoryId: "" })
-                    }
+                    value={importForm.accountId}
+                    onValueChange={(v) => setImportForm({ ...importForm, accountId: v })}
                   >
-                    <SelectTrigger data-testid="select-type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="receita">Receita</SelectItem>
-                      <SelectItem value="despesa">Despesa</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Data</Label>
-                  <Input
-                    type="date"
-                    value={form.date}
-                    onChange={(e) => setForm({ ...form, date: e.target.value })}
-                    data-testid="input-date"
-                  />
-                </div>
-              </div>
-              <div>
-                <Label>Descrição</Label>
-                <Input
-                  placeholder="Ex: Supermercado"
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  data-testid="input-description"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Valor (R$)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    placeholder="0,00"
-                    value={form.amount}
-                    onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                    data-testid="input-amount"
-                  />
-                </div>
-                <div>
-                  <Label>Categoria</Label>
-                  <Select
-                    value={form.categoryId}
-                    onValueChange={(v) => setForm({ ...form, categoryId: v })}
-                  >
-                    <SelectTrigger data-testid="select-category">
+                    <SelectTrigger>
                       <SelectValue placeholder="Selecione" />
                     </SelectTrigger>
                     <SelectContent>
-                      {filteredCategories.map((c) => (
-                        <SelectItem key={c.id} value={String(c.id)}>
-                          {c.name}
+                      {accounts.map((a) => (
+                        <SelectItem key={a.id} value={String(a.id)}>
+                          {a.name} ({a.type})
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {accounts.length === 0 ? (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Nenhuma conta cadastrada. Crie via `POST /api/accounts`.
+                    </p>
+                  ) : null}
                 </div>
-              </div>
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={createMutation.isPending}
-                data-testid="button-submit-transaction"
-              >
-                {createMutation.isPending ? "Salvando..." : "Registrar"}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Fonte</Label>
+                    <Select
+                      value={importForm.sourceKind}
+                      onValueChange={(v) =>
+                        setImportForm({ ...importForm, sourceKind: v as any })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="statement">Extrato</SelectItem>
+                        <SelectItem value="card_invoice">Fatura Cartão</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Connector</Label>
+                    <Input
+                      value={importForm.connectorId}
+                      onChange={(e) =>
+                        setImportForm({ ...importForm, connectorId: e.target.value })
+                      }
+                      placeholder="generic_csv"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label>Arquivos</Label>
+                  <Input
+                    type="file"
+                    multiple
+                    onChange={(e) => setImportForm({ ...importForm, files: e.target.files })}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Suporta CSV, XLSX, OFX, PDF, TXT e imagens (OCR).
+                  </p>
+                </div>
+
+                <Button type="submit" className="w-full" disabled={importMutation.isPending}>
+                  {importMutation.isPending ? "Importando..." : "Importar"}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button data-testid="button-add-transaction">
+                <Plus className="size-4 mr-1.5" />
+                Nova Transação
               </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Nova Transação</DialogTitle>
+              </DialogHeader>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!form.description || !form.amount) return;
+                  createMutation.mutate(form);
+                }}
+                className="space-y-4"
+              >
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Tipo</Label>
+                    <Select
+                      value={form.type}
+                      onValueChange={(v) =>
+                        setForm({ ...form, type: v as "receita" | "despesa", categoryId: "" })
+                      }
+                    >
+                      <SelectTrigger data-testid="select-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="receita">Receita</SelectItem>
+                        <SelectItem value="despesa">Despesa</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Data</Label>
+                    <Input
+                      type="date"
+                      value={form.date}
+                      onChange={(e) => setForm({ ...form, date: e.target.value })}
+                      data-testid="input-date"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label>Descrição</Label>
+                  <Input
+                    placeholder="Ex: Supermercado"
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    data-testid="input-description"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Valor (R$)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      placeholder="0,00"
+                      value={form.amount}
+                      onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                      data-testid="input-amount"
+                    />
+                  </div>
+                  <div>
+                    <Label>Categoria</Label>
+                    <Select
+                      value={form.categoryId}
+                      onValueChange={(v) => setForm({ ...form, categoryId: v })}
+                    >
+                      <SelectTrigger data-testid="select-category">
+                        <SelectValue placeholder="Selecione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {filteredCategories.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={createMutation.isPending}
+                  data-testid="button-submit-transaction"
+                >
+                  {createMutation.isPending ? "Salvando..." : "Registrar"}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Summary cards */}
