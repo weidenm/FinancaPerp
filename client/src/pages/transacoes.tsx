@@ -38,7 +38,6 @@ export default function Transacoes() {
   const [openImport, setOpenImport] = useState(false);
   const [importForm, setImportForm] = useState({
     accountId: "",
-    connectorId: "generic_csv",
     sourceKind: "statement" as "statement" | "card_invoice",
     files: null as FileList | null,
   });
@@ -79,11 +78,10 @@ export default function Transacoes() {
 
   const createAccountFromImportMutation = useMutation({
     mutationFn: async () => {
-      const connectorId = importForm.connectorId.trim() || "generic_csv";
       const res = await apiRequest("POST", "/api/accounts", {
         name: newAccountOnImport.name.trim(),
         type: newAccountOnImport.type,
-        connectorId,
+        connectorId: "generic_csv",
         signConvention: "natural",
         currency: "BRL",
       });
@@ -146,18 +144,42 @@ export default function Transacoes() {
       }
       const fd = new FormData();
       fd.append("accountId", importForm.accountId);
-      fd.append("connectorId", importForm.connectorId);
       fd.append("sourceKind", importForm.sourceKind);
       for (const f of Array.from(importForm.files)) fd.append("files", f);
       const res = await apiRequestFormData("POST", "/api/imports", fd);
-      return res.json();
+      const data = (await res.json()) as {
+        importId?: number;
+        counts?: { raw?: number; ledger?: number; needsReview?: number };
+      };
+      const importId = data.importId;
+      if (importId == null) throw new Error("Resposta inválida do servidor (sem importId).");
+      const commitRes = await apiRequest("POST", `/api/imports/${importId}/commit`);
+      const commit = (await commitRes.json()) as {
+        created?: number;
+        alreadyCommitted?: boolean;
+      };
+      return { import: data, commit };
     },
-    onSuccess: (data: any) => {
+    onSuccess: ({ import: data, commit }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
       setOpenImport(false);
-      setImportForm({ accountId: "", connectorId: "generic_csv", sourceKind: "statement", files: null });
+      setImportForm({ accountId: "", sourceKind: "statement", files: null });
+      const raw = data?.counts?.raw ?? 0;
+      const ledger = data?.counts?.ledger ?? 0;
+      const needsReview = data?.counts?.needsReview ?? 0;
+      const created = commit?.created ?? 0;
+      const already = commit?.alreadyCommitted === true;
       toast({
-        title: "Importação concluída",
-        description: `Raw: ${data?.counts?.raw ?? 0} · Ledger: ${data?.counts?.ledger ?? 0} · Revisão: ${data?.counts?.needsReview ?? 0}`,
+        title: already ? "Importação já processada" : "Importação concluída",
+        description: [
+          `Linhas no arquivo: ${raw} · Normalizadas: ${ledger}`,
+          needsReview ? `Com alerta de revisão: ${needsReview}` : null,
+          already
+            ? "Lançamentos já estavam gravados na lista."
+            : `Novas transações na lista: ${created} (use o mês da data de cada lançamento para vê-las).`,
+        ]
+          .filter(Boolean)
+          .join(" · "),
       });
     },
     onError: (e: any) => {
@@ -220,6 +242,7 @@ export default function Transacoes() {
               if (!o) {
                 setShowNewAccountOnImport(false);
                 setNewAccountOnImport({ name: "", type: "checking" });
+                setImportForm({ accountId: "", sourceKind: "statement", files: null });
               }
             }}
           >
@@ -271,7 +294,7 @@ export default function Transacoes() {
                   {showNewAccountOnImport ? (
                     <div className="rounded-md border p-3 space-y-3 bg-muted/30">
                       <p className="text-xs text-muted-foreground">
-                        O connector da nova conta será o mesmo informado abaixo neste formulário.
+                        A conta usa o formato padrão de arquivos (CSV, OFX, Excel, etc.).
                       </p>
                       <div>
                         <Label className="text-xs">Nome da conta</Label>
@@ -327,34 +350,25 @@ export default function Transacoes() {
                   ) : null}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Fonte</Label>
-                    <Select
-                      value={importForm.sourceKind}
-                      onValueChange={(v) =>
-                        setImportForm({ ...importForm, sourceKind: v as any })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="statement">Extrato</SelectItem>
-                        <SelectItem value="card_invoice">Fatura Cartão</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Connector</Label>
-                    <Input
-                      value={importForm.connectorId}
-                      onChange={(e) =>
-                        setImportForm({ ...importForm, connectorId: e.target.value })
-                      }
-                      placeholder="generic_csv"
-                    />
-                  </div>
+                <div>
+                  <Label>Fonte do arquivo</Label>
+                  <Select
+                    value={importForm.sourceKind}
+                    onValueChange={(v) =>
+                      setImportForm({ ...importForm, sourceKind: v as "statement" | "card_invoice" })
+                    }
+                  >
+                    <SelectTrigger data-testid="select-import-source-kind">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="statement">Extrato (conta corrente / poupança)</SelectItem>
+                      <SelectItem value="card_invoice">Fatura de cartão de crédito</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    O tipo de arquivo (CSV, OFX, Excel…) é detectado automaticamente.
+                  </p>
                 </div>
 
                 <div>
@@ -365,7 +379,8 @@ export default function Transacoes() {
                     onChange={(e) => setImportForm({ ...importForm, files: e.target.files })}
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    Suporta CSV, XLSX, OFX, PDF, TXT e imagens (OCR).
+                    Suporta CSV, XLSX, OFX, PDF, TXT e imagens (OCR). Lançamentos classificados como
+                    receita ou despesa entram na lista; transferências e pagamento de fatura não.
                   </p>
                 </div>
 

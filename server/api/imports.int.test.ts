@@ -1,7 +1,14 @@
 import { describe, expect, test, beforeAll, afterAll } from "vitest";
 import request from "supertest";
 import { db } from "../infra/db";
-import { accounts, imports, importFiles, rawTransactions, ledgerTransactions } from "@shared/schema";
+import {
+  accounts,
+  imports,
+  importFiles,
+  rawTransactions,
+  ledgerTransactions,
+  transactions,
+} from "@shared/schema";
 import { eq } from "drizzle-orm";
 
 let app: any;
@@ -34,6 +41,8 @@ afterAll(async () => {
     await db.delete(importFiles).where(eq(importFiles.importId, createdImportId)).run();
     await db.delete(imports).where(eq(imports.id, createdImportId)).run();
   }
+  await db.delete(transactions).where(eq(transactions.date, "2026-01-01")).run();
+  await db.delete(transactions).where(eq(transactions.date, "2026-01-03")).run();
   await db.delete(accounts).where(eq(accounts.id, accountId)).run();
 });
 
@@ -63,6 +72,40 @@ describe("imports API", () => {
     expect(ledgerRes.status).toBe(200);
     const ledger = ledgerRes.body as any[];
     expect(ledger.find((t) => String(t.descriptionNormalized).includes("PAGAMENTO FATURA"))?.kind).toBe("transfer");
+
+    const commitRes = await request(app).post(`/api/imports/${createdImportId}/commit`);
+    expect(commitRes.status).toBe(200);
+    expect(commitRes.body.created).toBe(2);
+
+    const txRes = await request(app).get("/api/transactions?startDate=2026-01-01&endDate=2026-01-31");
+    expect(txRes.status).toBe(200);
+    const txs = txRes.body as any[];
+    expect(txs.some((t) => String(t.description).includes("Supermercado"))).toBe(true);
+
+    const commitAgain = await request(app).post(`/api/imports/${createdImportId}/commit`);
+    expect(commitAgain.status).toBe(200);
+    expect(commitAgain.body.alreadyCommitted).toBe(true);
+    expect(commitAgain.body.created).toBe(0);
+  });
+
+  test("accepts import without connectorId (uses account default)", async () => {
+    const csv = ["date,description,amount", "2026-02-01,Only row,10.00"].join("\n");
+    const res = await request(app)
+      .post("/api/imports")
+      .field("accountId", String(accountId))
+      .field("sourceKind", "statement")
+      .attach("files", Buffer.from(csv, "utf-8"), { filename: "x.csv", contentType: "text/csv" });
+
+    expect(res.status).toBe(201);
+    const impId = res.body.importId as number;
+    const commitRes = await request(app).post(`/api/imports/${impId}/commit`);
+    expect(commitRes.status).toBe(200);
+    expect(commitRes.body.created).toBe(1);
+    await db.delete(transactions).where(eq(transactions.date, "2026-02-01")).run();
+    await db.delete(ledgerTransactions).where(eq(ledgerTransactions.importId, impId)).run();
+    await db.delete(rawTransactions).where(eq(rawTransactions.importId, impId)).run();
+    await db.delete(importFiles).where(eq(importFiles.importId, impId)).run();
+    await db.delete(imports).where(eq(imports.id, impId)).run();
   });
 });
 
