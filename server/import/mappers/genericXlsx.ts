@@ -1,13 +1,6 @@
 import type { RawDocument, RawTxnCandidate } from "../../domain/ledger/types";
-
-function asIsoDate(input: unknown): string | null {
-  if (typeof input !== "string") return null;
-  const s = input.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-  return null;
-}
+import { normalizeHeader, isDateHeader, isDescHeader, isAmountHeader } from "../columnHints";
+import { asIsoDateLoose } from "../dateParse";
 
 export function mapGenericXlsx(doc: RawDocument): RawTxnCandidate[] {
   const rows = doc.rows || [];
@@ -15,16 +8,33 @@ export function mapGenericXlsx(doc: RawDocument): RawTxnCandidate[] {
 
   for (const r of rows) {
     const row = r as Record<string, unknown>;
-    const postedAt =
-      asIsoDate(row.date) ||
-      asIsoDate(row.data) ||
-      asIsoDate(row.posted_at) ||
-      new Date().toISOString().slice(0, 10);
+
+    let dateVal: unknown;
+    let descVal: unknown;
+    let amountVal: unknown;
+
+    for (const [k, v] of Object.entries(row)) {
+      const h = normalizeHeader(k);
+      if (dateVal == null && isDateHeader(h)) dateVal = v;
+      else if (descVal == null && isDescHeader(h)) descVal = v;
+      else if (amountVal == null && isAmountHeader(h)) amountVal = v;
+    }
+
+    const postedParsed =
+      asIsoDateLoose(dateVal) ||
+      asIsoDateLoose(row.date) ||
+      asIsoDateLoose(row.data) ||
+      asIsoDateLoose(row.posted_at);
+    const postedAt = postedParsed || new Date().toISOString().slice(0, 10);
+    const dateInferred = postedParsed == null;
 
     const descriptionRaw =
+      (descVal != null ? String(descVal) : "") ||
       String(row.description ?? row.descricao ?? row.memo ?? "").trim();
 
-    const amountRaw = String(row.amount ?? row.valor ?? row.value ?? "").trim();
+    const amountRaw =
+      (amountVal != null ? String(amountVal) : "") ||
+      String(row.amount ?? row.valor ?? row.value ?? "").trim();
 
     out.push({
       externalId: (row.external_id ?? row.fitid ?? null) as any,
@@ -33,10 +43,9 @@ export function mapGenericXlsx(doc: RawDocument): RawTxnCandidate[] {
       transactionCode: (row.transaction_code ?? row.code ?? null) as any,
       amountRaw,
       amountRawSignHint: "unknown",
-      metadata: { doc: doc.originalName, row },
+      metadata: { doc: doc.originalName, row, dateInferred },
     });
   }
 
   return out;
 }
-

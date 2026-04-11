@@ -1,27 +1,86 @@
 import type { RawDocument, RawTxnCandidate } from "../../domain/ledger/types";
+import {
+  normalizeHeader,
+  isDateHeader,
+  isDescHeader,
+  isAmountHeader,
+} from "../columnHints";
+import { asIsoDateFromString } from "../dateParse";
 
-function splitCsvLine(line: string): string[] {
-  // Very small CSV parser: supports comma/semicolon, no quoted commas.
-  const sep = line.includes(";") && !line.includes(",") ? ";" : ",";
-  return line.split(sep).map((s) => s.trim());
+/** Split on `sep` outside of double quotes. */
+export function splitCsvLineWithSep(line: string, sep: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && ch === sep) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
 }
 
-function normalizeHeader(h: string): string {
-  return h
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, "_")
-    .replace(/[^\w_]/g, "");
+function median(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const s = [...nums].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
 }
 
-function asIsoDate(input: string): string | null {
-  const s = input.trim();
-  // YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  // DD/MM/YYYY
-  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-  return null;
+/** Prefer `;` when it yields more columns than `,` (typical BR CSV with decimal commas). */
+export function detectCsvDelimiter(sampleLines: string[]): ";" | "," {
+  if (sampleLines.length === 0) return ",";
+  const countsSemi = sampleLines.map((l) => splitCsvLineWithSep(l, ";").length);
+  const countsComma = sampleLines.map((l) => splitCsvLineWithSep(l, ",").length);
+  const medSemi = median(countsSemi);
+  const medComma = median(countsComma);
+  if (medSemi > medComma) return ";";
+  if (medComma > medSemi) return ",";
+  const first = sampleLines[0];
+  const nSemi = (first.match(/;/g) || []).length;
+  const nComma = (first.match(/,/g) || []).length;
+  if (nSemi > nComma) return ";";
+  return ",";
+}
+
+function headerLooksLikeDataRow(cols: string[]): boolean {
+  if (cols.length === 0) return false;
+  const first = cols[0]?.trim() ?? "";
+  if (asIsoDateFromString(first)) return true;
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(first)) return true;
+  if (/^-?\d+[.,]\d{2}$/.test(first.replace(/\./g, "").replace(",", "."))) return false;
+  return false;
+}
+
+function rowLooksLikeHeader(cols: string[]): boolean {
+  if (cols.length < 2) return false;
+  if (headerLooksLikeDataRow(cols)) return false;
+  const joined = cols.join(" ").toLowerCase();
+  const hints =
+    /data|date|valor|amount|desc|histor|lanç|lancamento|memo|credito|cr[eé]dito|d[eé]bito|fitid/i.test(
+      joined,
+    );
+  return hints;
+}
+
+function findColumnIndexBy(headersNorm: string[], pred: (h: string) => boolean): number {
+  return headersNorm.findIndex(pred);
+}
+
+function cellFromRow(row: Record<string, string>, colIdx: number, headersNorm: string[]): string {
+  if (colIdx >= 0 && colIdx < headersNorm.length) {
+    const key = headersNorm[colIdx];
+    if (key && row[key] !== undefined) return row[key] ?? "";
+  }
+  return "";
 }
 
 export function mapGenericCsv(doc: RawDocument): RawTxnCandidate[] {
@@ -29,25 +88,57 @@ export function mapGenericCsv(doc: RawDocument): RawTxnCandidate[] {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (lines.length === 0) return [];
 
-  const header = splitCsvLine(lines[0]).map(normalizeHeader);
-  const hasHeader = header.some((h) => ["date", "data", "posted_at", "descricao", "description", "amount", "valor"].includes(h));
+  const sample = lines.slice(0, Math.min(8, lines.length));
+  const sep = detectCsvDelimiter(sample);
 
+  const firstCols = splitCsvLineWithSep(lines[0], sep);
+  const hasHeader = rowLooksLikeHeader(firstCols);
   const startIdx = hasHeader ? 1 : 0;
+
+  const headersNorm = hasHeader ? firstCols.map(normalizeHeader) : [];
+
+  const dateIdx = hasHeader ? findColumnIndexBy(headersNorm, isDateHeader) : 0;
+  const descIdx = hasHeader ? findColumnIndexBy(headersNorm, isDescHeader) : 1;
+  const amountIdx = hasHeader ? findColumnIndexBy(headersNorm, isAmountHeader) : 2;
+
   const candidates: RawTxnCandidate[] = [];
 
   for (let i = startIdx; i < lines.length; i++) {
-    const cols = splitCsvLine(lines[i]);
+    const cols = splitCsvLineWithSep(lines[i], sep);
     const row: Record<string, string> = {};
     if (hasHeader) {
-      for (let c = 0; c < header.length; c++) row[header[c] || `col_${c}`] = cols[c] ?? "";
+      for (let c = 0; c < headersNorm.length; c++) {
+        const key = headersNorm[c] || `col_${c}`;
+        row[key] = cols[c] ?? "";
+      }
     } else {
       for (let c = 0; c < cols.length; c++) row[`col_${c}`] = cols[c] ?? "";
     }
 
-    const dateRaw = row.date || row.data || row.posted_at || row.col_0 || "";
-    const postedAt = asIsoDate(dateRaw) || new Date().toISOString().slice(0, 10);
-    const descriptionRaw = row.description || row.descricao || row.memo || row.col_1 || "";
-    const amountRaw = row.amount || row.valor || row.value || row.col_2 || "";
+    const dateRaw = hasHeader
+      ? cellFromRow(row, dateIdx, headersNorm) || row.col_0 || ""
+      : row.col_0 || "";
+    const postedParsed = asIsoDateFromString(dateRaw);
+    const postedAt = postedParsed || new Date().toISOString().slice(0, 10);
+    const dateInferred = postedParsed == null;
+
+    const descriptionRaw = hasHeader
+      ? (descIdx >= 0 ? cellFromRow(row, descIdx, headersNorm) : "") ||
+        row.description ||
+        row.descricao ||
+        row.memo ||
+        row.col_1 ||
+        ""
+      : row.col_1 || "";
+
+    const amountRaw = hasHeader
+      ? (amountIdx >= 0 ? cellFromRow(row, amountIdx, headersNorm) : "") ||
+        row.amount ||
+        row.valor ||
+        row.value ||
+        row.col_2 ||
+        ""
+      : row.col_2 || "";
 
     candidates.push({
       externalId: row.external_id || row.fitid || null,
@@ -56,10 +147,9 @@ export function mapGenericCsv(doc: RawDocument): RawTxnCandidate[] {
       transactionCode: row.transaction_code || row.code || null,
       amountRaw,
       amountRawSignHint: "unknown",
-      metadata: { doc: doc.originalName, row },
+      metadata: { doc: doc.originalName, row, dateInferred, csvDelimiter: sep },
     });
   }
 
   return candidates;
 }
-
