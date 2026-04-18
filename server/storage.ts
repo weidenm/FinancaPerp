@@ -12,12 +12,14 @@ export interface IStorage {
   getCategories(): Promise<Category[]>;
   getCategory(id: number): Promise<Category | undefined>;
   createCategory(cat: InsertCategory): Promise<Category>;
+  updateCategory(id: number, updates: Partial<InsertCategory>): Promise<Category | undefined>;
   deleteCategory(id: number): Promise<void>;
 
   // Transactions
   getTransactions(startDate?: string, endDate?: string): Promise<Transaction[]>;
   getTransaction(id: number): Promise<Transaction | undefined>;
   createTransaction(tx: InsertTransaction): Promise<Transaction>;
+  updateTransaction(id: number, updates: Partial<InsertTransaction>): Promise<Transaction | undefined>;
   deleteTransaction(id: number): Promise<void>;
 
   // Budgets
@@ -48,6 +50,10 @@ export class DatabaseStorage implements IStorage {
     return await db.insert(categories).values(cat).returning().get();
   }
 
+  async updateCategory(id: number, updates: Partial<InsertCategory>): Promise<Category | undefined> {
+    return await db.update(categories).set(updates).where(eq(categories.id, id)).returning().get();
+  }
+
   async deleteCategory(id: number): Promise<void> {
     await db.delete(categories).where(eq(categories.id, id)).run();
   }
@@ -69,6 +75,10 @@ export class DatabaseStorage implements IStorage {
 
   async createTransaction(tx: InsertTransaction): Promise<Transaction> {
     return await db.insert(transactions).values(tx).returning().get();
+  }
+
+  async updateTransaction(id: number, updates: Partial<InsertTransaction>): Promise<Transaction | undefined> {
+    return await db.update(transactions).set(updates).where(eq(transactions.id, id)).returning().get();
   }
 
   async deleteTransaction(id: number): Promise<void> {

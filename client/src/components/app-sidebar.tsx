@@ -4,6 +4,8 @@ import {
   PieChart,
   Target,
   Shield,
+  CreditCard,
+  Tag,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -24,6 +26,11 @@ const navItems = [
   { title: "Transações", url: "/transacoes", icon: ArrowLeftRight },
   { title: "Orçamentos", url: "/orcamentos", icon: PieChart },
   { title: "Metas", url: "/metas", icon: Target },
+];
+
+const configItems = [
+  { title: "Contas", url: "/contas", icon: CreditCard },
+  { title: "Categorias", url: "/categorias", icon: Tag },
 ];
 
 export function AppSidebar() {
@@ -78,6 +85,26 @@ export function AppSidebar() {
                   item.url === "/"
                     ? location === "/" || location === ""
                     : location.startsWith(item.url);
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive}>
+                      <Link href={item.url}>
+                        <item.icon className="size-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Configurações</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {configItems.map((item) => {
+                const isActive = location.startsWith(item.url);
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton asChild isActive={isActive}>
