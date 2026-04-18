@@ -11,6 +11,8 @@ import Dashboard from "@/pages/dashboard";
 import Transacoes from "@/pages/transacoes";
 import Orcamentos from "@/pages/orcamentos";
 import Metas from "@/pages/metas";
+import Contas from "@/pages/contas";
+import Categorias from "@/pages/categorias";
 import NotFound from "@/pages/not-found";
 import { useEffect } from "react";
 import { apiRequest } from "@/lib/queryClient";
@@ -22,6 +24,8 @@ function AppRouter() {
       <Route path="/transacoes" component={Transacoes} />
       <Route path="/orcamentos" component={Orcamentos} />
       <Route path="/metas" component={Metas} />
+      <Route path="/contas" component={Contas} />
+      <Route path="/categorias" component={Categorias} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -28,6 +28,15 @@ export async function registerRoutes(
     res.status(201).json(cat);
   });
 
+  app.patch("/api/categories/:id", async (req, res) => {
+    const patchSchema = insertCategorySchema.partial();
+    const parsed = patchSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+    const cat = await storage.updateCategory(Number(req.params.id), parsed.data);
+    if (!cat) return res.status(404).json({ error: "Category not found" });
+    res.json(cat);
+  });
+
   app.delete("/api/categories/:id", async (req, res) => {
     await storage.deleteCategory(Number(req.params.id));
     res.status(204).send();
@@ -53,6 +62,21 @@ export async function registerRoutes(
   app.delete("/api/transactions/:id", async (req, res) => {
     await storage.deleteTransaction(Number(req.params.id));
     res.status(204).send();
+  });
+
+  app.patch("/api/transactions/:id", async (req, res) => {
+    const patchSchema = z.object({
+      description: z.string().min(1).optional(),
+      amount: z.number().positive().optional(),
+      type: z.enum(["receita", "despesa"]).optional(),
+      categoryId: z.number().int().positive().nullable().optional(),
+      date: z.string().min(1).optional(),
+    });
+    const parsed = patchSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+    const tx = await storage.updateTransaction(Number(req.params.id), parsed.data as any);
+    if (!tx) return res.status(404).json({ error: "Transaction not found" });
+    res.json(tx);
   });
 
   // ─── Budgets ──────────────────────────────────

@@ -27,6 +27,17 @@ export async function createAccountRow(data: Omit<Account, "id">): Promise<Accou
   return await db.insert(accounts).values(data).returning().get();
 }
 
+export async function updateAccountRow(
+  id: number,
+  patch: Partial<Pick<Account, "name" | "type" | "signConvention" | "connectorId" | "currency">>,
+): Promise<Account | undefined> {
+  return await db.update(accounts).set(patch).where(eq(accounts.id, id)).returning().get();
+}
+
+export async function deleteAccountRow(id: number): Promise<void> {
+  await db.delete(accounts).where(eq(accounts.id, id)).run();
+}
+
 export async function findImportByIdempotencyKey(idempotencyKey: string): Promise<Import | undefined> {
   return await db.select().from(imports).where(eq(imports.idempotencyKey, idempotencyKey)).get();
 }

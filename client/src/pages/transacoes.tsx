@@ -28,6 +28,7 @@ import {
   ArrowDownRight,
   ChevronLeft,
   ChevronRight,
+  Pencil,
 } from "lucide-react";
 import type { Transaction, Category, Account } from "@shared/schema";
 
@@ -36,6 +37,14 @@ export default function Transacoes() {
   const [month, setMonth] = useState(getCurrentMonth());
   const [open, setOpen] = useState(false);
   const [openImport, setOpenImport] = useState(false);
+  const [editTransaction, setEditTransaction] = useState<Transaction | null>(null);
+  const [editForm, setEditForm] = useState({
+    description: "",
+    amount: "",
+    type: "despesa" as "receita" | "despesa",
+    categoryId: "",
+    date: "",
+  });
   const [importForm, setImportForm] = useState({
     accountId: "",
     sourceKind: "statement" as "statement" | "card_invoice",
@@ -134,6 +143,27 @@ export default function Transacoes() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
       toast({ title: "Transação removida" });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: typeof editForm }) => {
+      const res = await apiRequest("PATCH", `/api/transactions/${id}`, {
+        description: data.description,
+        amount: parseFloat(data.amount),
+        type: data.type,
+        categoryId: data.categoryId ? parseInt(data.categoryId) : null,
+        date: data.date,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+      setEditTransaction(null);
+      toast({ title: "Transação atualizada" });
+    },
+    onError: () => {
+      toast({ title: "Erro ao atualizar", variant: "destructive" });
     },
   });
 
@@ -574,6 +604,23 @@ export default function Transacoes() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        onClick={() => {
+                          setEditTransaction(tx);
+                          setEditForm({
+                            description: tx.description,
+                            amount: String(tx.amount),
+                            type: tx.type,
+                            categoryId: tx.categoryId ? String(tx.categoryId) : "",
+                            date: tx.date,
+                          });
+                        }}
+                        data-testid={`button-edit-${tx.id}`}
+                      >
+                        <Pencil className="size-3.5 text-muted-foreground" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => deleteMutation.mutate(tx.id)}
                         data-testid={`button-delete-${tx.id}`}
                       >
@@ -587,6 +634,107 @@ export default function Transacoes() {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit transaction dialog */}
+      <Dialog
+        open={!!editTransaction}
+        onOpenChange={(o) => {
+          if (!o) setEditTransaction(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Transação</DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!editTransaction || !editForm.description || !editForm.amount) return;
+              updateMutation.mutate({ id: editTransaction.id, data: editForm });
+            }}
+            className="space-y-4"
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Tipo</Label>
+                <Select
+                  value={editForm.type}
+                  onValueChange={(v) =>
+                    setEditForm({ ...editForm, type: v as "receita" | "despesa", categoryId: "" })
+                  }
+                >
+                  <SelectTrigger data-testid="select-edit-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="receita">Receita</SelectItem>
+                    <SelectItem value="despesa">Despesa</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Data</Label>
+                <Input
+                  type="date"
+                  value={editForm.date}
+                  onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
+                  data-testid="input-edit-date"
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Descrição</Label>
+              <Input
+                placeholder="Ex: Supermercado"
+                value={editForm.description}
+                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                data-testid="input-edit-description"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Valor (R$)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={editForm.amount}
+                  onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
+                  data-testid="input-edit-amount"
+                />
+              </div>
+              <div>
+                <Label>Categoria</Label>
+                <Select
+                  value={editForm.categoryId}
+                  onValueChange={(v) => setEditForm({ ...editForm, categoryId: v })}
+                >
+                  <SelectTrigger data-testid="select-edit-category">
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories
+                      .filter((c) => c.type === editForm.type || c.type === "ambos")
+                      .map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={updateMutation.isPending}
+              data-testid="button-submit-edit-transaction"
+            >
+              {updateMutation.isPending ? "Salvando..." : "Salvar Alterações"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
