@@ -23,6 +23,7 @@ export const transactions = sqliteTable("transactions", {
   type: text("type", { enum: ["receita", "despesa"] }).notNull(),
   categoryId: integer("category_id").references(() => categories.id),
   date: text("date").notNull(), // ISO date string YYYY-MM-DD
+  ledgerTransactionId: integer("ledger_transaction_id"), // nullable back-ref to ledger_transactions
 });
 
 export const insertTransactionSchema = createInsertSchema(transactions).omit({ id: true }).extend({
@@ -81,11 +82,15 @@ export const accounts = sqliteTable("accounts", {
     .notNull()
     .default("natural"),
   currency: text("currency").notNull().default("BRL"),
+  treatPixAsExpense: integer("treat_pix_as_expense", { mode: "boolean" })
+    .notNull()
+    .default(false),
 });
 
 export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true }).extend({
   name: z.string().min(1, "Nome obrigatório"),
   connectorId: z.string().min(1, "Connector obrigatório"),
+  treatPixAsExpense: z.boolean().optional().default(false),
 });
 export type InsertAccount = z.infer<typeof insertAccountSchema>;
 export type Account = typeof accounts.$inferSelect;

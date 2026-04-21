@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -46,6 +47,7 @@ const emptyForm = {
   connectorId: "generic_csv",
   signConvention: "natural" as Account["signConvention"],
   currency: "BRL",
+  treatPixAsExpense: false,
 };
 
 export default function Contas() {
@@ -104,6 +106,7 @@ export default function Contas() {
       connectorId: account.connectorId,
       signConvention: account.signConvention,
       currency: account.currency,
+      treatPixAsExpense: account.treatPixAsExpense,
     });
   }
 
@@ -177,6 +180,9 @@ export default function Contas() {
                         </p>
                         <p className="text-xs text-muted-foreground mt-0.5">
                           Sinal: {SIGN_CONVENTION_LABELS[account.signConvention]}
+                          {account.treatPixAsExpense && (
+                            <span className="ml-1.5 text-blue-600 dark:text-blue-400">· PIX como despesa</span>
+                          )}
                         </p>
                       </div>
                     </div>
@@ -239,13 +245,7 @@ export default function Contas() {
 }
 
 interface AccountFormProps {
-  form: {
-    name: string;
-    type: Account["type"];
-    connectorId: string;
-    signConvention: Account["signConvention"];
-    currency: string;
-  };
+  form: typeof emptyForm;
   setForm: React.Dispatch<React.SetStateAction<typeof emptyForm>>;
   isPending: boolean;
   onSubmit: () => void;
@@ -315,6 +315,20 @@ function AccountForm({ form, setForm, isPending, onSubmit, submitLabel }: Accoun
         <p className="text-xs text-muted-foreground mt-1">
           Use "Invertido" se o extrato do banco mostra despesas com valor positivo.
         </p>
+      </div>
+      <div className="flex items-center justify-between rounded-md border px-3 py-2.5">
+        <div>
+          <p className="text-sm font-medium">PIX/TED/DOC como despesa</p>
+          <p className="text-xs text-muted-foreground">
+            Quando ativo, transferências via PIX/TED/DOC são lançadas como receita ou despesa
+            (rules v2).
+          </p>
+        </div>
+        <Switch
+          checked={form.treatPixAsExpense}
+          onCheckedChange={(v) => setForm((f) => ({ ...f, treatPixAsExpense: v }))}
+          data-testid="switch-treat-pix-as-expense"
+        />
       </div>
       <Button
         type="submit"

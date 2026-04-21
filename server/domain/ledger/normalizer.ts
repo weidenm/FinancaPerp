@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { RawTxnCandidate, NormalizedLedgerTxn } from "./types";
 import { classifyKindV1, LEDGER_RULE_VERSION_V1, normalizeSignV1, type RuleContext } from "./rules/v1";
+import { classifyKindV2, LEDGER_RULE_VERSION_V2, type RuleContextV2 } from "./rules/v2";
 
 function normalizeDescription(input: string): string {
   return (input || "")
@@ -42,31 +43,42 @@ export function fingerprintCandidate(input: {
   return crypto.createHash("sha256").update(base).digest("hex");
 }
 
-export function normalizeCandidateV1(params: {
+interface NormalizeParams {
   accountId: number;
   connectorId: string;
   accountType: "checking" | "savings" | "credit_card";
   signConvention: "natural" | "inverted";
   sourceKind: "statement" | "card_invoice";
   candidate: RawTxnCandidate;
-}): NormalizedLedgerTxn {
+  treatPixAsExpense?: boolean;
+}
+
+function normalizeCandidateInternal(params: NormalizeParams, ruleVersion: string): NormalizedLedgerTxn {
   const { candidate } = params;
 
   const amountParsed = parseAmountLoose(candidate.amountRaw);
   const descriptionNormalized = normalizeDescription(candidate.descriptionRaw);
 
-  const ctx: RuleContext = {
+  const ctx: RuleContextV2 = {
     accountType: params.accountType,
     signConvention: params.signConvention,
     sourceKind: params.sourceKind,
     connectorId: params.connectorId,
+    treatPixAsExpense: params.treatPixAsExpense ?? false,
   };
 
-  const classified = classifyKindV1(ctx, {
-    description: descriptionNormalized,
-    transactionCode: candidate.transactionCode,
-    metadata: candidate.metadata,
-  });
+  const classified =
+    ruleVersion === LEDGER_RULE_VERSION_V2
+      ? classifyKindV2(ctx, {
+          description: descriptionNormalized,
+          transactionCode: candidate.transactionCode,
+          metadata: candidate.metadata,
+        })
+      : classifyKindV1(ctx, {
+          description: descriptionNormalized,
+          transactionCode: candidate.transactionCode,
+          metadata: candidate.metadata,
+        });
 
   const amountBase = amountParsed ?? 0;
   const sign = normalizeSignV1({
@@ -79,7 +91,7 @@ export function normalizeCandidateV1(params: {
   const needsReview = amountParsed === null || descriptionNormalized.length === 0;
 
   const audit = {
-    ruleVersion: LEDGER_RULE_VERSION_V1,
+    ruleVersion,
     classified,
     sign: sign.audit,
     amountParsed,
@@ -106,5 +118,13 @@ export function normalizeCandidateV1(params: {
     audit,
     fingerprint,
   };
+}
+
+export function normalizeCandidateV1(params: NormalizeParams): NormalizedLedgerTxn {
+  return normalizeCandidateInternal(params, LEDGER_RULE_VERSION_V1);
+}
+
+export function normalizeCandidateV2(params: NormalizeParams): NormalizedLedgerTxn {
+  return normalizeCandidateInternal(params, LEDGER_RULE_VERSION_V2);
 }
 

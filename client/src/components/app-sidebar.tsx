@@ -6,6 +6,7 @@ import {
   Shield,
   CreditCard,
   Tag,
+  Upload,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -29,6 +30,7 @@ const navItems = [
 ];
 
 const configItems = [
+  { title: "Importações", url: "/importacoes", icon: Upload },
   { title: "Contas", url: "/contas", icon: CreditCard },
   { title: "Categorias", url: "/categorias", icon: Tag },
 ];

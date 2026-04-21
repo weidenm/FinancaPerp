@@ -4,7 +4,7 @@ import multer from "multer";
 import { z } from "zod";
 import { parseUploadToRawDocuments } from "../import/parser";
 import { mapDocumentsToCandidates } from "../import/mappers";
-import { normalizeCandidatesV1 } from "../domain/ledger/pipeline";
+import { normalizeCandidates, normalizeCandidatesV1 } from "../domain/ledger/pipeline";
 import { pickDuplicatesByFingerprint } from "../domain/ledger/dedupe";
 import {
   addAuditEvent,
@@ -23,10 +23,13 @@ import {
   listImports,
   listLedgerTransactions,
   listRawTransactions,
+  listTransactionsByImport,
   markImportStatus,
   updateLedgerTransaction,
+  updateTransactionCategory,
 } from "../infra/ledgerRepo";
 import { LEDGER_RULE_VERSION_V1 } from "../domain/ledger/rules/v1";
+import { LEDGER_RULE_VERSION_V2 } from "../domain/ledger/rules/v2";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -38,17 +41,90 @@ function buildIdempotencyKey(input: Record<string, unknown>): string {
   return crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
 }
 
+const DEFAULT_RULE_VERSION = LEDGER_RULE_VERSION_V2;
+
 const createImportBodySchema = z.object({
   accountId: z.coerce.number().int().positive(),
-  /** Opcional: se omitido ou vazio, usa o da conta e por último `generic_csv`. */
   connectorId: z.string().optional(),
   sourceKind: z.enum(["statement", "card_invoice"]),
-  ruleVersion: z.string().min(1).optional().default(LEDGER_RULE_VERSION_V1),
+  ruleVersion: z.string().min(1).optional().default(DEFAULT_RULE_VERSION),
 });
+
+async function runNormalizePipeline(params: {
+  importId: number;
+  account: { id: number; type: "checking" | "savings" | "credit_card"; signConvention: "natural" | "inverted"; treatPixAsExpense: boolean };
+  connectorId: string;
+  sourceKind: "statement" | "card_invoice";
+  ruleVersion: string;
+  candidates: import("../domain/ledger/types").RawTxnCandidate[];
+}) {
+  const { importId, account, connectorId, sourceKind, ruleVersion, candidates } = params;
+
+  const normalized = normalizeCandidates({
+    accountId: account.id,
+    connectorId,
+    accountType: account.type,
+    signConvention: account.signConvention,
+    sourceKind,
+    candidates,
+    treatPixAsExpense: account.treatPixAsExpense,
+    ruleVersion,
+  });
+
+  const existingFp = await findExistingLedgerByFingerprints({
+    accountId: account.id,
+    fingerprints: normalized.map((n) => n.fingerprint),
+  });
+  const existingByFp = new Map(existingFp.map((x) => [x.fingerprint, x.id]));
+
+  const now = new Date().toISOString();
+  const ledgerRows = normalized.map((n) => ({
+    importId,
+    accountId: account.id,
+    postedAt: n.postedAt,
+    descriptionNormalized: n.descriptionNormalized,
+    amountRaw: n.amountRaw,
+    amountNormalized: n.amountNormalized,
+    fingerprint: n.fingerprint,
+    kind: n.kind,
+    affectsIncomeExpense: n.affectsIncomeExpense,
+    transferGroupId: n.transferGroupId ?? null,
+    duplicateOfId: existingByFp.get(n.fingerprint) ?? null,
+    confidence: n.confidence,
+    ruleVersion,
+    auditJson: JSON.stringify(n.audit),
+    needsReview: n.needsReview || existingByFp.has(n.fingerprint),
+    reviewNotes: null,
+    updatedAt: now,
+  }));
+
+  const inserted = await insertLedgerTransactions(ledgerRows as any);
+  const dupMap = pickDuplicatesByFingerprint(
+    inserted
+      .filter((t) => t.duplicateOfId == null)
+      .map((t) => ({ id: t.id, fingerprint: t.fingerprint })),
+  );
+  for (const [id, dupOf] of Array.from(dupMap.entries())) {
+    await updateLedgerTransaction(id, { duplicateOfId: dupOf, needsReview: true });
+  }
+
+  return inserted;
+}
 
 export function registerImportRoutes(app: Express) {
   app.get("/api/imports", async (_req, res) => {
-    res.json(await listImports());
+    const allImports = await listImports();
+    // Enrich with account info per import (batch)
+    const { listAccounts } = await import("../infra/ledgerRepo");
+    const accounts = await listAccounts();
+    const accountMap = new Map(accounts.map((a) => [a.id, a]));
+    res.json(
+      allImports.map((imp) => ({
+        ...imp,
+        accountName: accountMap.get(imp.accountId)?.name ?? null,
+        accountType: accountMap.get(imp.accountId)?.type ?? null,
+      })),
+    );
   });
 
   app.get("/api/imports/:id", async (req, res) => {
@@ -68,6 +144,10 @@ export function registerImportRoutes(app: Express) {
   app.get("/api/imports/:id/ledger-transactions", async (req, res) => {
     const includeDuplicates = req.query.includeDuplicates === "true";
     res.json(await listLedgerTransactions(Number(req.params.id), { includeDuplicates }));
+  });
+
+  app.get("/api/imports/:id/committed-transactions", async (req, res) => {
+    res.json(await listTransactionsByImport(Number(req.params.id)));
   });
 
   app.post("/api/imports", upload.array("files"), async (req: Request, res: Response) => {
@@ -92,11 +172,13 @@ export function registerImportRoutes(app: Express) {
       sizeBytes: f.size,
     }));
 
+    const ruleVersion = parsed.data.ruleVersion;
+
     const idempotencyKey = buildIdempotencyKey({
       accountId: parsed.data.accountId,
       connectorId,
       sourceKind: parsed.data.sourceKind,
-      ruleVersion: parsed.data.ruleVersion,
+      ruleVersion,
       files: fileDigests.map((f) => f.sha256).sort(),
     });
 
@@ -121,7 +203,7 @@ export function registerImportRoutes(app: Express) {
       sourceKind: parsed.data.sourceKind,
       connectorId,
       idempotencyKey,
-      ruleVersion: parsed.data.ruleVersion,
+      ruleVersion,
       status: "parsed",
     } as any);
 
@@ -150,51 +232,14 @@ export function registerImportRoutes(app: Express) {
     }));
     await insertRawTransactions(importRow.id, rawRows as any);
 
-    const normalized = normalizeCandidatesV1({
-      accountId: account.id,
+    await runNormalizePipeline({
+      importId: importRow.id,
+      account,
       connectorId,
-      accountType: account.type,
-      signConvention: account.signConvention,
       sourceKind: parsed.data.sourceKind,
+      ruleVersion,
       candidates,
     });
-
-    const existingFp = await findExistingLedgerByFingerprints({
-      accountId: account.id,
-      fingerprints: normalized.map((n) => n.fingerprint),
-    });
-    const existingByFp = new Map(existingFp.map((x) => [x.fingerprint, x.id]));
-
-    const now = new Date().toISOString();
-    const ledgerRows = normalized.map((n) => ({
-      importId: importRow.id,
-      accountId: account.id,
-      postedAt: n.postedAt,
-      descriptionNormalized: n.descriptionNormalized,
-      amountRaw: n.amountRaw,
-      amountNormalized: n.amountNormalized,
-      fingerprint: n.fingerprint,
-      kind: n.kind,
-      affectsIncomeExpense: n.affectsIncomeExpense,
-      transferGroupId: n.transferGroupId ?? null,
-      duplicateOfId: existingByFp.get(n.fingerprint) ?? null,
-      confidence: n.confidence,
-      ruleVersion: parsed.data.ruleVersion,
-      auditJson: JSON.stringify(n.audit),
-      needsReview: n.needsReview || existingByFp.has(n.fingerprint),
-      reviewNotes: null,
-      updatedAt: now,
-    }));
-
-    const inserted = await insertLedgerTransactions(ledgerRows as any);
-    const dupMap = pickDuplicatesByFingerprint(
-      inserted
-        .filter((t) => t.duplicateOfId == null)
-        .map((t) => ({ id: t.id, fingerprint: t.fingerprint })),
-    );
-    for (const [id, dupOf] of Array.from(dupMap.entries())) {
-      await updateLedgerTransaction(id, { duplicateOfId: dupOf, needsReview: true });
-    }
 
     const ledgerAll = await listLedgerTransactions(importRow.id, { includeDuplicates: true });
     const needsReviewCount = ledgerAll.filter((t) => t.needsReview).length;
@@ -218,7 +263,7 @@ export function registerImportRoutes(app: Express) {
     const imp = await getImport(importId);
     if (!imp) return res.status(404).json({ error: "Import not found" });
 
-    const ruleVersion = String(req.body?.ruleVersion || imp.ruleVersion || LEDGER_RULE_VERSION_V1);
+    const ruleVersion = String(req.body?.ruleVersion || imp.ruleVersion || DEFAULT_RULE_VERSION);
 
     const account = await getAccount(imp.accountId);
     if (!account) return res.status(404).json({ error: "Account not found" });
@@ -236,51 +281,14 @@ export function registerImportRoutes(app: Express) {
 
     await deleteLedgerByImport(importId);
 
-    const normalized = normalizeCandidatesV1({
-      accountId: account.id,
+    await runNormalizePipeline({
+      importId,
+      account,
       connectorId: imp.connectorId,
-      accountType: account.type,
-      signConvention: account.signConvention,
       sourceKind: imp.sourceKind,
+      ruleVersion,
       candidates,
     });
-
-    const existingFp = await findExistingLedgerByFingerprints({
-      accountId: account.id,
-      fingerprints: normalized.map((n) => n.fingerprint),
-    });
-    const existingByFp = new Map(existingFp.map((x) => [x.fingerprint, x.id]));
-
-    const now = new Date().toISOString();
-    const ledgerRows = normalized.map((n) => ({
-      importId,
-      accountId: account.id,
-      postedAt: n.postedAt,
-      descriptionNormalized: n.descriptionNormalized,
-      amountRaw: n.amountRaw,
-      amountNormalized: n.amountNormalized,
-      fingerprint: n.fingerprint,
-      kind: n.kind,
-      affectsIncomeExpense: n.affectsIncomeExpense,
-      transferGroupId: n.transferGroupId ?? null,
-      duplicateOfId: existingByFp.get(n.fingerprint) ?? null,
-      confidence: n.confidence,
-      ruleVersion,
-      auditJson: JSON.stringify(n.audit),
-      needsReview: n.needsReview || existingByFp.has(n.fingerprint),
-      reviewNotes: null,
-      updatedAt: now,
-    }));
-
-    const inserted = await insertLedgerTransactions(ledgerRows as any);
-    const dupMap = pickDuplicatesByFingerprint(
-      inserted
-        .filter((t) => t.duplicateOfId == null)
-        .map((t) => ({ id: t.id, fingerprint: t.fingerprint })),
-    );
-    for (const [id, dupOf] of Array.from(dupMap.entries())) {
-      await updateLedgerTransaction(id, { duplicateOfId: dupOf, needsReview: true });
-    }
 
     const ledgerAll = await listLedgerTransactions(importId, { includeDuplicates: true });
     const needsReviewCount = ledgerAll.filter((t) => t.needsReview).length;
@@ -356,5 +364,30 @@ export function registerImportRoutes(app: Express) {
 
     res.json({ importId, ...result });
   });
-}
 
+  // Bulk categorize committed transactions from an import
+  app.post("/api/imports/:id/bulk-categorize", async (req, res) => {
+    const importId = Number(req.params.id);
+    const imp = await getImport(importId);
+    if (!imp) return res.status(404).json({ error: "Import not found" });
+
+    const bodySchema = z.object({
+      assignments: z.array(
+        z.object({
+          transactionId: z.number().int().positive(),
+          categoryId: z.number().int().positive().nullable(),
+        }),
+      ),
+    });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    let updated = 0;
+    for (const { transactionId, categoryId } of parsed.data.assignments) {
+      await updateTransactionCategory(transactionId, categoryId);
+      updated++;
+    }
+
+    res.json({ updated });
+  });
+}
