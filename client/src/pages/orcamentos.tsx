@@ -29,8 +29,16 @@ import {
   ChevronLeft,
   ChevronRight,
   Pencil,
+  Copy,
 } from "lucide-react";
 import type { Budget, Transaction, Category } from "@shared/schema";
+
+/** Return the YYYY-MM that is `offset` months before `month` (YYYY-MM). */
+function shiftMonth(month: string, offset: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(y, m - 1 + offset);
+  return d.toISOString().slice(0, 7);
+}
 
 export default function Orcamentos() {
   const { toast } = useToast();
@@ -112,6 +120,30 @@ export default function Orcamentos() {
     },
   });
 
+  const copyMutation = useMutation({
+    mutationFn: async ({ fromMonth, toMonth }: { fromMonth: string; toMonth: string }) => {
+      const res = await apiRequest("POST", "/api/budgets/copy", { fromMonth, toMonth });
+      return res.json() as Promise<{ copied: number; skipped: number }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/budgets"] });
+      if (data.copied === 0) {
+        toast({
+          title: "Nada a copiar",
+          description: data.skipped > 0
+            ? `${data.skipped} categorias já tinham orçamento neste mês.`
+            : "Mês de origem sem orçamentos.",
+        });
+      } else {
+        toast({
+          title: `${data.copied} orçamento${data.copied !== 1 ? "s" : ""} copiado${data.copied !== 1 ? "s" : ""}`,
+          description: data.skipped > 0 ? `${data.skipped} já existiam e foram mantidos.` : undefined,
+        });
+      }
+    },
+    onError: () => toast({ title: "Erro ao copiar orçamentos", variant: "destructive" }),
+  });
+
   const dataLoading = budgetsLoading || txLoading;
 
   const navigateMonth = (dir: number) => {
@@ -158,15 +190,30 @@ export default function Orcamentos() {
           </div>
         </div>
 
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button
-              data-testid="button-add-budget"
-              disabled={availableCategories.length === 0}
-            >
-              <Plus className="size-4 mr-1.5" />
-              Novo Orçamento
-            </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              copyMutation.mutate({ fromMonth: shiftMonth(month, -1), toMonth: month })
+            }
+            disabled={copyMutation.isPending}
+            data-testid="button-copy-budgets"
+            title={`Copiar orçamentos de ${getMonthLabel(shiftMonth(month, -1))}`}
+          >
+            <Copy className="size-4 mr-1.5" />
+            Copiar mês anterior
+          </Button>
+
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button
+                data-testid="button-add-budget"
+                disabled={availableCategories.length === 0}
+              >
+                <Plus className="size-4 mr-1.5" />
+                Novo Orçamento
+              </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
@@ -220,7 +267,8 @@ export default function Orcamentos() {
               </Button>
             </form>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       {/* Total overview */}
