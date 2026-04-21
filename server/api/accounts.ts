@@ -23,6 +23,7 @@ export function registerAccountRoutes(app: Express) {
       connectorId: z.string().min(1).optional(),
       signConvention: z.enum(["natural", "inverted"]).optional(),
       currency: z.string().min(1).optional(),
+      treatPixAsExpense: z.boolean().optional(),
     });
     const parsed = patchSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });

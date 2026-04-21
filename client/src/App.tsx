@@ -13,6 +13,7 @@ import Orcamentos from "@/pages/orcamentos";
 import Metas from "@/pages/metas";
 import Contas from "@/pages/contas";
 import Categorias from "@/pages/categorias";
+import Importacoes from "@/pages/importacoes";
 import NotFound from "@/pages/not-found";
 import { useEffect } from "react";
 import { apiRequest } from "@/lib/queryClient";
@@ -26,6 +27,7 @@ function AppRouter() {
       <Route path="/metas" component={Metas} />
       <Route path="/contas" component={Contas} />
       <Route path="/categorias" component={Categorias} />
+      <Route path="/importacoes" component={Importacoes} />
       <Route component={NotFound} />
     </Switch>
   );

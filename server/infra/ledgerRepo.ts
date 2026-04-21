@@ -29,7 +29,7 @@ export async function createAccountRow(data: Omit<Account, "id">): Promise<Accou
 
 export async function updateAccountRow(
   id: number,
-  patch: Partial<Pick<Account, "name" | "type" | "signConvention" | "connectorId" | "currency">>,
+  patch: Partial<Pick<Account, "name" | "type" | "signConvention" | "connectorId" | "currency" | "treatPixAsExpense">>,
 ): Promise<Account | undefined> {
   return await db.update(accounts).set(patch).where(eq(accounts.id, id)).returning().get();
 }
@@ -160,19 +160,45 @@ export async function commitLedgerToAppTransactions(params: { importId: number }
   const withValue = rows.filter((t) => Math.abs(t.amountNormalized) > 1e-9);
   if (withValue.length === 0) return { created: 0 };
 
-  const inserts = withValue.map((t) => {
+  const inserted: { id: number; ledgerTransactionId: number }[] = [];
+  for (const t of withValue) {
     const isIncome = t.amountNormalized > 0;
-    return {
+    const tx = await db.insert(transactions).values({
       description: t.descriptionNormalized,
       amount: Math.abs(t.amountNormalized),
       type: isIncome ? ("receita" as const) : ("despesa" as const),
       categoryId: null,
       date: t.postedAt,
-    };
-  });
+      ledgerTransactionId: t.id,
+    }).returning().get();
+    inserted.push({ id: tx.id, ledgerTransactionId: t.id });
+  }
 
-  await db.insert(transactions).values(inserts).run();
-  return { created: inserts.length };
+  return { created: inserted.length };
+}
+
+export async function listTransactionsByImport(importId: number) {
+  const ledgerRows = await db
+    .select({ id: ledgerTransactions.id })
+    .from(ledgerTransactions)
+    .where(eq(ledgerTransactions.importId, importId))
+    .all();
+  if (ledgerRows.length === 0) return [];
+  const ledgerIds = ledgerRows.map((r) => r.id);
+  return await db
+    .select()
+    .from(transactions)
+    .where(inArray(transactions.ledgerTransactionId, ledgerIds))
+    .all();
+}
+
+export async function updateTransactionCategory(transactionId: number, categoryId: number | null) {
+  return await db
+    .update(transactions)
+    .set({ categoryId })
+    .where(eq(transactions.id, transactionId))
+    .returning()
+    .get();
 }
 
 export async function markImportStatus(importId: number, status: Import["status"]) {
