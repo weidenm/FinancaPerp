@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency, getCurrentMonth, getMonthLabel, getLastDayOfMonth } from "@/lib/utils";
@@ -18,6 +19,8 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -26,6 +29,20 @@ import {
 } from "recharts";
 import { apiRequest } from "@/lib/queryClient";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+interface MonthlySummary {
+  month: string;
+  receitas: number;
+  despesas: number;
+  saldo: number;
+}
 
 const COLORS = [
   "hsl(160, 84%, 29%)",
@@ -38,8 +55,18 @@ const COLORS = [
   "hsl(175, 60%, 35%)",
 ];
 
+const TREND_MONTHS_OPTIONS = [3, 6, 12];
+
+/** Format YYYY-MM as "Jan/25" */
+function shortMonth(ym: string): string {
+  const [y, m] = ym.split("-");
+  const d = new Date(Number(y), Number(m) - 1);
+  return d.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "") + "/" + String(y).slice(2);
+}
+
 export default function Dashboard() {
   const currentMonth = getCurrentMonth();
+  const [trendMonths, setTrendMonths] = useState(6);
 
   const { data: transactions = [], isLoading: txLoading } = useQuery<Transaction[]>({
     queryKey: ["/api/transactions", currentMonth],
@@ -57,6 +84,14 @@ export default function Dashboard() {
 
   const { data: categories = [] } = useQuery<{ id: number; name: string; icon: string; color: string }[]>({
     queryKey: ["/api/categories"],
+  });
+
+  const { data: summary = [] } = useQuery<MonthlySummary[]>({
+    queryKey: ["/api/transactions/summary", trendMonths],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/transactions/summary?months=${trendMonths}`);
+      return res.json();
+    },
   });
 
   const receitas = transactions
@@ -101,7 +136,21 @@ export default function Dashboard() {
     return { date: label, total };
   });
 
+  const trendData = summary.map((s) => ({
+    month: shortMonth(s.month),
+    Receitas: s.receitas,
+    Despesas: s.despesas,
+    Saldo: s.saldo,
+  }));
+
   const recentTransactions = transactions.slice(0, 5);
+
+  const tooltipStyle = {
+    borderRadius: "8px",
+    border: "1px solid hsl(var(--border))",
+    backgroundColor: "hsl(var(--card))",
+    color: "hsl(var(--foreground))",
+  };
 
   if (txLoading) {
     return (
@@ -194,6 +243,87 @@ export default function Dashboard() {
         </Card>
       </div>
 
+      {/* Trend chart — full width */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <CardTitle className="text-sm font-semibold">Tendência Mensal</CardTitle>
+            <Select
+              value={String(trendMonths)}
+              onValueChange={(v) => setTrendMonths(Number(v))}
+            >
+              <SelectTrigger className="h-7 w-28 text-xs" data-testid="select-trend-months">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TREND_MONTHS_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)} className="text-xs">
+                    {n} meses
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {trendData.length === 0 ? (
+            <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
+              Sem dados suficientes
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={trendData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`}
+                  width={48}
+                />
+                <Tooltip
+                  formatter={(value: number) => formatCurrency(value)}
+                  labelStyle={{ color: "hsl(var(--foreground))" }}
+                  contentStyle={tooltipStyle}
+                />
+                <Legend wrapperStyle={{ fontSize: "11px" }} />
+                <Line
+                  type="monotone"
+                  dataKey="Receitas"
+                  stroke="hsl(160, 84%, 29%)"
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="Despesas"
+                  stroke="hsl(0, 72%, 51%)"
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="Saldo"
+                  stroke="hsl(200, 80%, 45%)"
+                  strokeWidth={2}
+                  strokeDasharray="4 2"
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
@@ -228,12 +358,7 @@ export default function Dashboard() {
                   </Pie>
                   <Tooltip
                     formatter={(value: number) => formatCurrency(value)}
-                    contentStyle={{
-                      borderRadius: "8px",
-                      border: "1px solid hsl(var(--border))",
-                      backgroundColor: "hsl(var(--card))",
-                      color: "hsl(var(--foreground))",
-                    }}
+                    contentStyle={tooltipStyle}
                   />
                   <Legend
                     layout="vertical"
@@ -276,12 +401,7 @@ export default function Dashboard() {
                 <Tooltip
                   formatter={(value: number) => formatCurrency(value)}
                   labelStyle={{ color: "hsl(var(--foreground))" }}
-                  contentStyle={{
-                    borderRadius: "8px",
-                    border: "1px solid hsl(var(--border))",
-                    backgroundColor: "hsl(var(--card))",
-                    color: "hsl(var(--foreground))",
-                  }}
+                  contentStyle={tooltipStyle}
                 />
                 <Bar
                   dataKey="total"

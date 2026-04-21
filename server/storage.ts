@@ -7,6 +7,13 @@ import {
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { db } from "./infra/db";
 
+export interface MonthlySummary {
+  month: string; // YYYY-MM
+  receitas: number;
+  despesas: number;
+  saldo: number;
+}
+
 export interface IStorage {
   // Categories
   getCategories(): Promise<Category[]>;
@@ -27,6 +34,10 @@ export interface IStorage {
   createBudget(budget: InsertBudget): Promise<Budget>;
   updateBudget(id: number, limit: number): Promise<Budget | undefined>;
   deleteBudget(id: number): Promise<void>;
+  copyBudgets(fromMonth: string, toMonth: string): Promise<{ copied: number; skipped: number }>;
+
+  // Summary
+  getMonthlySummary(months: number): Promise<MonthlySummary[]>;
 
   // Goals
   getGoals(): Promise<Goal[]>;
@@ -100,6 +111,51 @@ export class DatabaseStorage implements IStorage {
 
   async deleteBudget(id: number): Promise<void> {
     await db.delete(budgets).where(eq(budgets.id, id)).run();
+  }
+
+  async copyBudgets(fromMonth: string, toMonth: string): Promise<{ copied: number; skipped: number }> {
+    const source = await db.select().from(budgets).where(eq(budgets.month, fromMonth)).all();
+    if (source.length === 0) return { copied: 0, skipped: 0 };
+
+    const existing = await db.select().from(budgets).where(eq(budgets.month, toMonth)).all();
+    const existingCatIds = new Set(existing.map((b) => b.categoryId));
+
+    let copied = 0;
+    let skipped = 0;
+    for (const b of source) {
+      if (existingCatIds.has(b.categoryId)) {
+        skipped++;
+      } else {
+        await db.insert(budgets).values({ categoryId: b.categoryId, limit: b.limit, month: toMonth }).run();
+        copied++;
+      }
+    }
+    return { copied, skipped };
+  }
+
+  async getMonthlySummary(months: number): Promise<MonthlySummary[]> {
+    const result: MonthlySummary[] = [];
+    const today = new Date();
+
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const month = d.toISOString().slice(0, 7);
+      const startDate = `${month}-01`;
+      const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      const endDate = `${month}-${String(lastDay).padStart(2, "0")}`;
+
+      const rows = await db
+        .select()
+        .from(transactions)
+        .where(and(gte(transactions.date, startDate), lte(transactions.date, endDate)))
+        .all();
+
+      const receitas = rows.filter((t) => t.type === "receita").reduce((s, t) => s + t.amount, 0);
+      const despesas = rows.filter((t) => t.type === "despesa").reduce((s, t) => s + t.amount, 0);
+      result.push({ month, receitas, despesas, saldo: receitas - despesas });
+    }
+
+    return result;
   }
 
   // Goals

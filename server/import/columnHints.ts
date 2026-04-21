@@ -1,7 +1,8 @@
 /** Normalized header keys and matchers for bank exports (PT-BR + EN). */
 
 export function stripAccents(s: string): string {
-  return s.normalize("NFD").replace(/\p{M}/gu, "");
+  // Combining marks after NFD (avoids `\p{M}` which needs TS `target`/lib that enables unicode regex props)
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 export function normalizeHeader(h: string): string {

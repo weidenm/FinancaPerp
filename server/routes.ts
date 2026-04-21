@@ -52,6 +52,45 @@ export async function registerRoutes(
     res.json(txs);
   });
 
+  app.get("/api/transactions/summary", async (req, res) => {
+    const months = Math.min(Math.max(parseInt((req.query.months as string) || "6", 10), 1), 24);
+    const summary = await storage.getMonthlySummary(months);
+    res.json(summary);
+  });
+
+  app.get("/api/transactions/export", async (req, res) => {
+    const { startDate, endDate, format = "csv" } = req.query;
+    if (format !== "csv") return res.status(400).json({ error: "Only csv format supported" });
+
+    const txs = await storage.getTransactions(
+      startDate as string | undefined,
+      endDate as string | undefined
+    );
+
+    const cats = await storage.getCategories();
+    const catMap = new Map(cats.map((c) => [c.id, c.name]));
+
+    const rows = [
+      ["Data", "Descrição", "Tipo", "Valor", "Categoria"].join(","),
+      ...txs.map((t) =>
+        [
+          t.date,
+          `"${(t.description || "").replace(/"/g, '""')}"`,
+          t.type,
+          t.amount.toFixed(2).replace(".", ","),
+          `"${catMap.get(t.categoryId ?? -1) ?? ""}"`,
+        ].join(",")
+      ),
+    ].join("\r\n");
+
+    const filename =
+      startDate && endDate ? `transacoes_${startDate}_${endDate}.csv` : "transacoes.csv";
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send("\uFEFF" + rows);
+  });
+
   app.post("/api/transactions", async (req, res) => {
     const parsed = insertTransactionSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -105,6 +144,17 @@ export async function registerRoutes(
   app.delete("/api/budgets/:id", async (req, res) => {
     await storage.deleteBudget(Number(req.params.id));
     res.status(204).send();
+  });
+
+  app.post("/api/budgets/copy", async (req, res) => {
+    const schema = z.object({
+      fromMonth: z.string().regex(/^\d{4}-\d{2}$/, "Formato YYYY-MM"),
+      toMonth: z.string().regex(/^\d{4}-\d{2}$/, "Formato YYYY-MM"),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+    const result = await storage.copyBudgets(parsed.data.fromMonth, parsed.data.toMonth);
+    res.json(result);
   });
 
   // ─── Goals ────────────────────────────────────
