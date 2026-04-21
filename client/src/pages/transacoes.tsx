@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, apiRequestFormData } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,6 +62,31 @@ export default function Transacoes() {
     categoryId: "",
     date: new Date().toISOString().slice(0, 10),
   });
+  const [suggestedCategoryId, setSuggestedCategoryId] = useState<number | null>(null);
+  const [suggestedCategoryName, setSuggestedCategoryName] = useState<string | null>(null);
+  const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchSuggestion = (description: string, type: "receita" | "despesa") => {
+    if (suggestTimer.current) clearTimeout(suggestTimer.current);
+    if (!description.trim()) {
+      setSuggestedCategoryId(null);
+      setSuggestedCategoryName(null);
+      return;
+    }
+    suggestTimer.current = setTimeout(async () => {
+      try {
+        const res = await apiRequest(
+          "GET",
+          `/api/categories/suggest?description=${encodeURIComponent(description)}&type=${type}`
+        );
+        const data = (await res.json()) as { categoryId: number | null; categoryName: string | null };
+        setSuggestedCategoryId(data.categoryId);
+        setSuggestedCategoryName(data.categoryName);
+      } catch {
+        // ignore
+      }
+    }, 400);
+  };
 
   const startDate = `${month}-01`;
   const endDate = getLastDayOfMonth(month);
@@ -129,6 +154,8 @@ export default function Transacoes() {
         categoryId: "",
         date: new Date().toISOString().slice(0, 10),
       });
+      setSuggestedCategoryId(null);
+      setSuggestedCategoryName(null);
       toast({ title: "Transação registrada" });
     },
     onError: () => {
@@ -443,11 +470,15 @@ export default function Transacoes() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>Tipo</Label>
-                    <Select
+                      <Select
                       value={form.type}
-                      onValueChange={(v) =>
-                        setForm({ ...form, type: v as "receita" | "despesa", categoryId: "" })
-                      }
+                      onValueChange={(v) => {
+                        const newType = v as "receita" | "despesa";
+                        setForm({ ...form, type: newType, categoryId: "" });
+                        setSuggestedCategoryId(null);
+                        setSuggestedCategoryName(null);
+                        if (form.description) fetchSuggestion(form.description, newType);
+                      }}
                     >
                       <SelectTrigger data-testid="select-type">
                         <SelectValue />
@@ -473,9 +504,34 @@ export default function Transacoes() {
                   <Input
                     placeholder="Ex: Supermercado"
                     value={form.description}
-                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    onChange={(e) => {
+                      const desc = e.target.value;
+                      setForm((prev) => ({ ...prev, description: desc }));
+                      if (!form.categoryId) {
+                        fetchSuggestion(desc, form.type);
+                      }
+                    }}
                     data-testid="input-description"
                   />
+                  {suggestedCategoryId && !form.categoryId && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Sugestão:{" "}
+                      <button
+                        type="button"
+                        className="text-primary underline"
+                        onClick={() => {
+                          setForm((prev) => ({
+                            ...prev,
+                            categoryId: String(suggestedCategoryId),
+                          }));
+                          setSuggestedCategoryId(null);
+                          setSuggestedCategoryName(null);
+                        }}
+                      >
+                        {suggestedCategoryName}
+                      </button>
+                    </p>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>

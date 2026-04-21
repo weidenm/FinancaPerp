@@ -5,6 +5,7 @@ import { insertTransactionSchema, insertCategorySchema, insertBudgetSchema, inse
 import { z } from "zod";
 import { registerImportRoutes } from "./api/imports";
 import { registerAccountRoutes } from "./api/accounts";
+import { registerReportRoutes } from "./api/reports";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -14,6 +15,9 @@ export async function registerRoutes(
   // ─── Ledger imports (bank statement + card invoice) ────────────
   registerAccountRoutes(app);
   registerImportRoutes(app);
+
+  // ─── Reports ──────────────────────────────────
+  registerReportRoutes(app);
 
   // ─── Categories ───────────────────────────────
   app.get("/api/categories", async (_req, res) => {
@@ -40,6 +44,65 @@ export async function registerRoutes(
   app.delete("/api/categories/:id", async (req, res) => {
     await storage.deleteCategory(Number(req.params.id));
     res.status(204).send();
+  });
+
+  /**
+   * GET /api/categories/suggest?description=...&type=despesa|receita
+   *
+   * Returns the best matching category id (or null) based on keyword matching
+   * between the description and category names / known keyword mappings.
+   */
+  app.get("/api/categories/suggest", async (req, res) => {
+    const description = String(req.query.description || "").toLowerCase().trim();
+    const type = req.query.type as "receita" | "despesa" | undefined;
+
+    if (!description) return res.json({ categoryId: null });
+
+    const cats = await storage.getCategories();
+    const filtered = type
+      ? cats.filter((c) => c.type === type || c.type === "ambos")
+      : cats;
+
+    // keyword → category name mappings for common PT-BR transactions
+    const keywordMap: Record<string, string[]> = {
+      "Alimentação": ["mercado", "supermercado", "restaurante", "lanche", "comida", "padaria", "ifood", "delivery", "açougue", "hortifruti", "alimento"],
+      "Transporte": ["uber", "99", "taxi", "táxi", "gasolina", "combustível", "estacionamento", "pedágio", "ônibus", "metrô", "passagem", "combustivel"],
+      "Moradia": ["aluguel", "condomínio", "condominio", "agua", "luz", "energia", "gás", "gas", "internet", "telefone", "iptu"],
+      "Saúde": ["farmácia", "farmacia", "remédio", "remedio", "consulta", "médico", "medico", "hospital", "exame", "plano de saúde", "dentista"],
+      "Educação": ["escola", "faculdade", "curso", "livro", "material", "mensalidade", "ensino"],
+      "Lazer": ["netflix", "spotify", "cinema", "show", "ingresso", "viagem", "hotel", "passagem aérea", "jogo"],
+      "Salário": ["salário", "salario", "pagamento", "holerite", "contra-cheque", "contracheque"],
+      "Freelance": ["freelance", "serviço", "servico", "projeto", "consultoria"],
+      "Investimentos": ["investimento", "dividendo", "rendimento", "cdb", "tesouro", "ação", "fundo"],
+    };
+
+    let bestCat: (typeof cats)[0] | null = null;
+    let bestScore = 0;
+
+    for (const cat of filtered) {
+      let score = 0;
+
+      // Direct name match
+      if (description.includes(cat.name.toLowerCase())) {
+        score += 10;
+      }
+
+      // Keyword map match
+      const keywords = keywordMap[cat.name] ?? [];
+      for (const kw of keywords) {
+        if (description.includes(kw)) {
+          score += 5;
+          break;
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestCat = cat;
+      }
+    }
+
+    res.json({ categoryId: bestCat?.id ?? null, categoryName: bestCat?.name ?? null });
   });
 
   // ─── Transactions ─────────────────────────────
@@ -105,6 +168,39 @@ export async function registerRoutes(
   app.delete("/api/budgets/:id", async (req, res) => {
     await storage.deleteBudget(Number(req.params.id));
     res.status(204).send();
+  });
+
+  /**
+   * POST /api/budgets/copy-from-month
+   * Body: { fromMonth: "YYYY-MM", toMonth: "YYYY-MM" }
+   *
+   * Copies all budgets from `fromMonth` to `toMonth`, skipping categories that
+   * already have a budget in `toMonth`.
+   */
+  app.post("/api/budgets/copy-from-month", async (req, res) => {
+    const schema = z.object({
+      fromMonth: z.string().regex(/^\d{4}-\d{2}$/, "Formato YYYY-MM"),
+      toMonth: z.string().regex(/^\d{4}-\d{2}$/, "Formato YYYY-MM"),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+    const { fromMonth, toMonth } = parsed.data;
+
+    const [source, existing] = await Promise.all([
+      storage.getBudgets(fromMonth),
+      storage.getBudgets(toMonth),
+    ]);
+
+    const existingCatIds = new Set(existing.map((b) => b.categoryId));
+    const toCreate = source.filter((b) => !existingCatIds.has(b.categoryId));
+
+    const created = await Promise.all(
+      toCreate.map((b) =>
+        storage.createBudget({ categoryId: b.categoryId, limit: b.limit, month: toMonth })
+      )
+    );
+
+    res.json({ created: created.length, skipped: source.length - created.length, budgets: created });
   });
 
   // ─── Goals ────────────────────────────────────

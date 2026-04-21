@@ -29,6 +29,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Pencil,
+  Copy,
 } from "lucide-react";
 import type { Budget, Transaction, Category } from "@shared/schema";
 
@@ -112,6 +113,33 @@ export default function Orcamentos() {
     },
   });
 
+  const copyFromPrevMonthMutation = useMutation({
+    mutationFn: async () => {
+      const [y, m] = month.split("-").map(Number);
+      const prevDate = new Date(y, m - 2, 1);
+      const fromMonth = prevDate.toISOString().slice(0, 7);
+      const res = await apiRequest("POST", "/api/budgets/copy-from-month", {
+        fromMonth,
+        toMonth: month,
+      });
+      return res.json() as Promise<{ created: number; skipped: number }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/budgets"] });
+      if (data.created === 0) {
+        toast({ title: "Nada para copiar", description: "O mês anterior não tem orçamentos novos para este mês." });
+      } else {
+        toast({
+          title: `${data.created} orçamento${data.created > 1 ? "s" : ""} copiado${data.created > 1 ? "s" : ""}`,
+          description: data.skipped > 0 ? `${data.skipped} já existiam e foram mantidos.` : undefined,
+        });
+      }
+    },
+    onError: () => {
+      toast({ title: "Erro ao copiar orçamentos", variant: "destructive" });
+    },
+  });
+
   const dataLoading = budgetsLoading || txLoading;
 
   const navigateMonth = (dir: number) => {
@@ -158,7 +186,19 @@ export default function Orcamentos() {
           </div>
         </div>
 
-        <Dialog open={open} onOpenChange={setOpen}>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => copyFromPrevMonthMutation.mutate()}
+            disabled={copyFromPrevMonthMutation.isPending}
+            data-testid="button-copy-budgets"
+            title="Copiar orçamentos do mês anterior"
+          >
+            <Copy className="size-4 mr-1.5" />
+            {copyFromPrevMonthMutation.isPending ? "Copiando..." : "Copiar mês anterior"}
+          </Button>
+
+          <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button
               data-testid="button-add-budget"
@@ -220,7 +260,8 @@ export default function Orcamentos() {
               </Button>
             </form>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       {/* Total overview */}
