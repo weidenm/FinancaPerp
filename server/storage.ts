@@ -136,7 +136,7 @@ export class DatabaseStorage implements IStorage {
     const today = new Date();
     for (let i = months - 1; i >= 0; i--) {
       const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      const month = d.toISOString().slice(0, 7);
+      const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const startDate = `${month}-01`;
       const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
       const endDate = `${month}-${String(lastDay).padStart(2, "0")}`;

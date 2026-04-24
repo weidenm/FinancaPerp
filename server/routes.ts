@@ -53,7 +53,8 @@ export async function registerRoutes(
   });
 
   app.get("/api/transactions/summary", async (req, res) => {
-    const months = Math.min(Math.max(parseInt((req.query.months as string) || "6", 10), 1), 24);
+    const parsed = parseInt((req.query.months as string) || "6", 10);
+    const months = Math.min(Math.max(isNaN(parsed) ? 6 : parsed, 1), 24);
     const summary = await storage.getMonthlySummary(months);
     res.json(summary);
   });
@@ -75,8 +76,8 @@ export async function registerRoutes(
         t.date,
         `"${(t.description || "").replace(/"/g, '""')}"`,
         t.type,
-        t.amount.toFixed(2).replace(".", ","),
-        `"${catMap.get(t.categoryId ?? -1) ?? ""}"`,
+        `"${t.amount.toFixed(2).replace(".", ",")}"`,
+        `"${(catMap.get(t.categoryId ?? -1) ?? "").replace(/"/g, '""')}"`,
       ].join(",")),
     ].join("\r\n");
 
