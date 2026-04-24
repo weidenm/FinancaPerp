@@ -58,6 +58,7 @@ export async function registerRoutes(
     res.json(summary);
   });
 
+  // CSV export
   app.get("/api/transactions/export", async (req, res) => {
     const { startDate, endDate, format = "csv" } = req.query;
     if (format !== "csv") return res.status(400).json({ error: "Only csv format supported" });
@@ -66,6 +67,7 @@ export async function registerRoutes(
       startDate as string | undefined,
       endDate as string | undefined
     );
+
     const cats = await storage.getCategories();
     const catMap = new Map(cats.map((c) => [c.id, c.name]));
 
@@ -86,6 +88,7 @@ export async function registerRoutes(
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    // BOM for Excel UTF-8 compatibility
     res.send("\uFEFF" + rows);
   });
 
@@ -144,6 +147,7 @@ export async function registerRoutes(
     res.status(204).send();
   });
 
+  // Copy budgets from one month to another
   app.post("/api/budgets/copy", async (req, res) => {
     const schema = z.object({
       fromMonth: z.string().regex(/^\d{4}-\d{2}$/, "Formato YYYY-MM"),

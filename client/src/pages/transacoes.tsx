@@ -29,6 +29,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Pencil,
+  Download,
 } from "lucide-react";
 import type { Transaction, Category, Account } from "@shared/schema";
 
@@ -264,7 +265,24 @@ export default function Transacoes() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const url = `/api/transactions/export?format=csv&startDate=${startDate}&endDate=${endDate}`;
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `transacoes_${month}.csv`;
+              a.click();
+            }}
+            data-testid="button-export-transactions"
+            title="Exportar transações do mês como CSV"
+          >
+            <Download className="size-4 mr-1.5" />
+            Exportar CSV
+          </Button>
+
           <Dialog
             open={openImport}
             onOpenChange={(o) => {
