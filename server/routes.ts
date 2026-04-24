@@ -52,7 +52,6 @@ export async function registerRoutes(
     res.json(txs);
   });
 
-  // Monthly summary for trend chart
   app.get("/api/transactions/summary", async (req, res) => {
     const months = Math.min(Math.max(parseInt((req.query.months as string) || "6", 10), 1), 24);
     const summary = await storage.getMonthlySummary(months);

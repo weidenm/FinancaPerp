@@ -10,6 +10,14 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["**/*.test.ts"],
+    // SQLite does not allow concurrent writes from multiple processes.
+    // Run test files sequentially so integration tests never contend.
+    pool: "forks",
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
   },
 });
 
