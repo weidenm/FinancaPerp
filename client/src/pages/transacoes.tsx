@@ -40,6 +40,7 @@ export default function Transacoes() {
   const [openImport, setOpenImport] = useState(false);
   const [editTransaction, setEditTransaction] = useState<Transaction | null>(null);
   const [editForm, setEditForm] = useState({
+    accountId: "",
     description: "",
     amount: "",
     type: "despesa" as "receita" | "despesa",
@@ -57,6 +58,7 @@ export default function Transacoes() {
     type: "checking" as "checking" | "savings" | "credit_card",
   });
   const [form, setForm] = useState({
+    accountId: "",
     description: "",
     amount: "",
     type: "despesa" as "receita" | "despesa",
@@ -112,6 +114,7 @@ export default function Transacoes() {
   const createMutation = useMutation({
     mutationFn: async (data: typeof form) => {
       const res = await apiRequest("POST", "/api/transactions", {
+        accountId: data.accountId ? parseInt(data.accountId) : null,
         description: data.description,
         amount: parseFloat(data.amount),
         type: data.type,
@@ -124,6 +127,7 @@ export default function Transacoes() {
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
       setOpen(false);
       setForm({
+        accountId: "",
         description: "",
         amount: "",
         type: "despesa",
@@ -150,6 +154,7 @@ export default function Transacoes() {
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: typeof editForm }) => {
       const res = await apiRequest("PATCH", `/api/transactions/${id}`, {
+        accountId: data.accountId ? parseInt(data.accountId) : null,
         description: data.description,
         amount: parseFloat(data.amount),
         type: data.type,
@@ -487,6 +492,24 @@ export default function Transacoes() {
                   </div>
                 </div>
                 <div>
+                  <Label>Conta</Label>
+                  <Select
+                    value={form.accountId}
+                    onValueChange={(v) => setForm({ ...form, accountId: v })}
+                  >
+                    <SelectTrigger data-testid="select-account">
+                      <SelectValue placeholder="Selecione" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((a) => (
+                        <SelectItem key={a.id} value={String(a.id)}>
+                          {a.name} ({a.type})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
                   <Label>Descrição</Label>
                   <Input
                     placeholder="Ex: Supermercado"
@@ -589,6 +612,7 @@ export default function Transacoes() {
             <div className="divide-y">
               {transactions.map((tx) => {
                 const cat = categories.find((c) => c.id === tx.categoryId);
+                const acc = accounts.find((a) => a.id === (tx as any).accountId);
                 return (
                   <div
                     key={tx.id}
@@ -608,7 +632,7 @@ export default function Transacoes() {
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{tx.description}</p>
                         <p className="text-xs text-muted-foreground">
-                          {cat?.name || "Outros"} · {formatDate(tx.date)}
+                          {(acc?.name ? `${acc.name} · ` : "")}{cat?.name || "Outros"} · {formatDate(tx.date)}
                         </p>
                       </div>
                     </div>
@@ -625,6 +649,7 @@ export default function Transacoes() {
                         onClick={() => {
                           setEditTransaction(tx);
                           setEditForm({
+                            accountId: (tx as any).accountId ? String((tx as any).accountId) : "",
                             description: tx.description,
                             amount: String(tx.amount),
                             type: tx.type,
@@ -699,6 +724,24 @@ export default function Transacoes() {
                   data-testid="input-edit-date"
                 />
               </div>
+            </div>
+            <div>
+              <Label>Conta</Label>
+              <Select
+                value={editForm.accountId}
+                onValueChange={(v) => setEditForm({ ...editForm, accountId: v })}
+              >
+                <SelectTrigger data-testid="select-edit-account">
+                  <SelectValue placeholder="Selecione" />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts.map((a) => (
+                    <SelectItem key={a.id} value={String(a.id)}>
+                      {a.name} ({a.type})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label>Descrição</Label>

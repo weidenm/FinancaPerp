@@ -1,7 +1,8 @@
 /** Normalized header keys and matchers for bank exports (PT-BR + EN). */
 
 export function stripAccents(s: string): string {
-  return s.normalize("NFD").replace(/\p{M}/gu, "");
+  // Avoid Unicode property escapes to keep TS target compatibility.
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 export function normalizeHeader(h: string): string {
@@ -23,6 +24,7 @@ export function isDescHeader(h: string): boolean {
   if (
     [
       "description",
+      "title",
       "descricao",
       "historico",
       "memo",
@@ -36,6 +38,7 @@ export function isDescHeader(h: string): boolean {
   )
     return true;
   if (h.includes("histor")) return true;
+  if (h.includes("title") || h.includes("titulo")) return true;
   if (h.includes("descricao") || (h.includes("desc") && !h.includes("metadata"))) return true;
   if (h.includes("lancamento") || h.includes("lanc_")) return true;
   return false;

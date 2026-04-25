@@ -163,6 +163,7 @@ export async function commitLedgerToAppTransactions(params: { importId: number }
   const inserts = withValue.map((t) => {
     const isIncome = t.amountNormalized > 0;
     return {
+      accountId: t.accountId,
       description: t.descriptionNormalized,
       amount: Math.abs(t.amountNormalized),
       type: isIncome ? ("receita" as const) : ("despesa" as const),

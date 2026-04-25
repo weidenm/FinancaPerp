@@ -111,6 +111,7 @@ export async function registerRoutes(
       type: z.enum(["receita", "despesa"]).optional(),
       categoryId: z.number().int().positive().nullable().optional(),
       date: z.string().min(1).optional(),
+      accountId: z.number().int().positive().nullable().optional(),
     });
     const parsed = patchSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
