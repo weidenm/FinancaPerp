@@ -18,6 +18,7 @@ export type Category = typeof categories.$inferSelect;
 // Transactions table
 export const transactions = sqliteTable("transactions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  accountId: integer("account_id").references(() => accounts.id),
   description: text("description").notNull(),
   amount: real("amount").notNull(),
   type: text("type", { enum: ["receita", "despesa"] }).notNull(),
@@ -30,6 +31,7 @@ export const insertTransactionSchema = createInsertSchema(transactions).omit({ i
   description: z.string().min(1, "Descrição obrigatória"),
   date: z.string().min(1, "Data obrigatória"),
   categoryId: z.number().int().positive().nullable().optional(),
+  accountId: z.number().int().positive().nullable().optional(),
 });
 export type InsertTransaction = z.infer<typeof insertTransactionSchema>;
 export type Transaction = typeof transactions.$inferSelect;
