@@ -1,0 +1,128 @@
+- generic:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - img
+                  - generic:
+                    - heading [level=1]: FinançaLocal
+                    - paragraph: Controle financeiro
+              - generic:
+                - generic:
+                  - generic: Navegação
+                  - generic:
+                    - list:
+                      - listitem:
+                        - link:
+                          - /url: "#/"
+                          - img
+                          - generic: Dashboard
+                      - listitem:
+                        - link:
+                          - /url: "#/transacoes"
+                          - img
+                          - generic: Transações
+                      - listitem:
+                        - link:
+                          - /url: "#/orcamentos"
+                          - img
+                          - generic: Orçamentos
+                      - listitem:
+                        - link:
+                          - /url: "#/metas"
+                          - img
+                          - generic: Metas
+                - generic:
+                  - generic: Configurações
+                  - generic:
+                    - list:
+                      - listitem:
+                        - link:
+                          - /url: "#/contas"
+                          - img
+                          - generic: Contas
+                      - listitem:
+                        - link:
+                          - /url: "#/categorias"
+                          - img
+                          - generic: Categorias
+              - generic:
+                - generic:
+                  - img
+                  - generic: Dados locais · LGPD
+        - generic:
+          - banner:
+            - button:
+              - img
+              - generic: Toggle Sidebar
+            - button:
+              - img
+          - main:
+            - generic:
+              - generic:
+                - generic:
+                  - heading [level=2]: Transações
+                  - generic:
+                    - button:
+                      - img
+                    - generic: abril de 2026
+                    - button:
+                      - img
+                - generic:
+                  - button:
+                    - img
+                    - text: Exportar CSV
+                  - button [expanded]: Importar
+                  - button:
+                    - img
+                    - text: Nova Transação
+              - generic:
+                - generic:
+                  - generic:
+                    - paragraph: Receitas
+                    - paragraph: R$ 0,00
+                - generic:
+                  - generic:
+                    - paragraph: Despesas
+                    - paragraph: R$ 0,00
+                - generic:
+                  - generic:
+                    - paragraph: Saldo do Mês
+                    - paragraph: R$ 0,00
+              - generic:
+                - generic:
+                  - generic: 0 transações no mês
+                - generic:
+                  - paragraph: Nenhuma transação neste mês
+    - list
+  - generic: R$0
+  - dialog "Importar arquivos" [ref=e124]:
+    - heading "Importar arquivos" [level=2] [ref=e126]
+    - generic [ref=e127]:
+      - generic [ref=e128]:
+        - generic [ref=e129]:
+          - generic [ref=e130]: Conta
+          - button "Nova conta" [active] [ref=e131] [cursor=pointer]
+        - combobox [ref=e132] [cursor=pointer]:
+          - generic: Selecione
+          - img [ref=e133]
+        - combobox [ref=e135]
+      - generic [ref=e136]:
+        - text: Fonte do arquivo
+        - combobox [ref=e137] [cursor=pointer]:
+          - generic: Extrato (conta corrente / poupança)
+          - img [ref=e138]
+        - combobox [ref=e140]
+        - paragraph [ref=e141]: O tipo de arquivo (CSV, OFX, Excel…) é detectado automaticamente.
+      - generic [ref=e142]:
+        - text: Arquivos
+        - button "Choose File" [ref=e143]
+        - paragraph [ref=e144]: Suporta CSV, XLSX, OFX, PDF, TXT e imagens (OCR). Lançamentos classificados como receita ou despesa entram na lista; transferências e pagamento de fatura não.
+      - button "Importar" [ref=e145] [cursor=pointer]
+    - button "Close" [ref=e146] [cursor=pointer]:
+      - img [ref=e147]
+      - generic [ref=e150]: Close

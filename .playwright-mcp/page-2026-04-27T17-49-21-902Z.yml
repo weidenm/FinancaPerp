@@ -1,0 +1,58 @@
+- generic [ref=e2]:
+  - generic [ref=e4]:
+    - generic [ref=e7]:
+      - generic [ref=e9]:
+        - img "FinançaLocal" [ref=e10]
+        - generic [ref=e13]:
+          - heading "FinançaLocal" [level=1] [ref=e14]
+          - paragraph [ref=e15]: Controle financeiro
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - generic [ref=e18]: Navegação
+          - list [ref=e20]:
+            - listitem [ref=e21]:
+              - link "Dashboard" [ref=e22] [cursor=pointer]:
+                - /url: "#/"
+                - img [ref=e23]
+                - generic [ref=e28]: Dashboard
+            - listitem [ref=e29]:
+              - link "Transações" [ref=e30] [cursor=pointer]:
+                - /url: "#/transacoes"
+                - img [ref=e31]
+                - generic [ref=e34]: Transações
+            - listitem [ref=e35]:
+              - link "Orçamentos" [ref=e36] [cursor=pointer]:
+                - /url: "#/orcamentos"
+                - img [ref=e37]
+                - generic [ref=e40]: Orçamentos
+            - listitem [ref=e41]:
+              - link "Metas" [ref=e42] [cursor=pointer]:
+                - /url: "#/metas"
+                - img [ref=e43]
+                - generic [ref=e47]: Metas
+        - generic [ref=e48]:
+          - generic [ref=e49]: Configurações
+          - list [ref=e51]:
+            - listitem [ref=e52]:
+              - link "Contas" [ref=e53] [cursor=pointer]:
+                - /url: "#/contas"
+                - img [ref=e54]
+                - generic [ref=e56]: Contas
+            - listitem [ref=e57]:
+              - link "Categorias" [ref=e58] [cursor=pointer]:
+                - /url: "#/categorias"
+                - img [ref=e59]
+                - generic [ref=e62]: Categorias
+      - generic [ref=e64]:
+        - img [ref=e65]
+        - generic [ref=e67]: Dados locais · LGPD
+    - generic [ref=e68]:
+      - banner [ref=e69]:
+        - button "Toggle Sidebar" [ref=e70] [cursor=pointer]:
+          - img
+          - generic [ref=e71]: Toggle Sidebar
+        - button "Modo escuro" [ref=e72] [cursor=pointer]:
+          - img
+      - main [ref=e73]
+  - region "Notifications (F8)":
+    - list
