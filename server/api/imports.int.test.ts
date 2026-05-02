@@ -66,6 +66,7 @@ describe("imports API", () => {
     expect(res.body.importId).toBeTypeOf("number");
     expect(res.body.counts.raw).toBe(3);
     expect(res.body.counts.ledger).toBe(3);
+    expect(res.body.autoCommitRecommended).toBe(true);
     createdImportId = res.body.importId;
 
     const ledgerRes = await request(app).get(`/api/imports/${createdImportId}/ledger-transactions?includeDuplicates=true`);
@@ -102,6 +103,34 @@ describe("imports API", () => {
     expect(commitRes.status).toBe(200);
     expect(commitRes.body.created).toBe(1);
     await db.delete(transactions).where(eq(transactions.date, "2026-02-01")).run();
+    await db.delete(ledgerTransactions).where(eq(ledgerTransactions.importId, impId)).run();
+    await db.delete(rawTransactions).where(eq(rawTransactions.importId, impId)).run();
+    await db.delete(importFiles).where(eq(importFiles.importId, impId)).run();
+    await db.delete(imports).where(eq(imports.id, impId)).run();
+  });
+
+  test("TXT-only import sets autoCommitRecommended false and marks needs_review", async () => {
+    const res = await request(app)
+      .post("/api/imports")
+      .field("accountId", String(accountId))
+      .field("sourceKind", "statement")
+      .attach("files", Buffer.from("Extrato sem tabela", "utf-8"), {
+        filename: "note.txt",
+        contentType: "text/plain",
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.autoCommitRecommended).toBe(false);
+    expect(Array.isArray(res.body.warnings)).toBe(true);
+    expect(res.body.warnings.length).toBeGreaterThan(0);
+    expect(res.body.counts.raw).toBe(1);
+    expect(res.body.status).toBe("needs_review");
+
+    const impId = res.body.importId as number;
+    const commitRes = await request(app).post(`/api/imports/${impId}/commit`);
+    expect(commitRes.status).toBe(200);
+    expect(commitRes.body.created).toBe(0);
+
     await db.delete(ledgerTransactions).where(eq(ledgerTransactions.importId, impId)).run();
     await db.delete(rawTransactions).where(eq(rawTransactions.importId, impId)).run();
     await db.delete(importFiles).where(eq(importFiles.importId, impId)).run();

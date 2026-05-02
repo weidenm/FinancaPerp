@@ -6,6 +6,7 @@ import {
   Shield,
   CreditCard,
   Tag,
+  ListChecks,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -24,6 +25,7 @@ import {
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Transações", url: "/transacoes", icon: ArrowLeftRight },
+  { title: "Importações", url: "/importacoes", icon: ListChecks },
   { title: "Orçamentos", url: "/orcamentos", icon: PieChart },
   { title: "Metas", url: "/metas", icon: Target },
 ];

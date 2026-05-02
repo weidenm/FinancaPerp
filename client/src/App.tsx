@@ -13,6 +13,7 @@ import Orcamentos from "@/pages/orcamentos";
 import Metas from "@/pages/metas";
 import Contas from "@/pages/contas";
 import Categorias from "@/pages/categorias";
+import ImportacoesLista, { ImportacaoLedgerDetail } from "@/pages/importacoes";
 import NotFound from "@/pages/not-found";
 import { useEffect } from "react";
 import { apiRequest } from "@/lib/queryClient";
@@ -22,6 +23,8 @@ function AppRouter() {
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/transacoes" component={Transacoes} />
+      <Route path="/importacoes/:importId" component={ImportacaoLedgerDetail} />
+      <Route path="/importacoes" component={ImportacoesLista} />
       <Route path="/orcamentos" component={Orcamentos} />
       <Route path="/metas" component={Metas} />
       <Route path="/contas" component={Contas} />

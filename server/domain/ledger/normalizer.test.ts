@@ -58,5 +58,26 @@ describe("normalizeCandidateV1", () => {
     expect(n.amountNormalized).toBeLessThan(0);
     expect(n.kind).toBe("purchase");
   });
+
+  test("UNMAPPED_TEXT placeholder always needs review and low confidence", () => {
+    const n = normalizeCandidateV1({
+      accountId: 1,
+      connectorId: "generic_csv",
+      accountType: "checking",
+      signConvention: "natural",
+      sourceKind: "statement",
+      candidate: {
+        postedAt: "2026-05-01",
+        descriptionRaw: "some pdf text",
+        transactionCode: "UNMAPPED_TEXT",
+        amountRaw: "0",
+        amountRawSignHint: "unknown",
+        metadata: { note: "unmapped_text_document" },
+      },
+    });
+    expect(n.needsReview).toBe(true);
+    expect(n.confidence).toBe(0.05);
+    expect(n.audit).toMatchObject({ unmappedDocument: true });
+  });
 });
 

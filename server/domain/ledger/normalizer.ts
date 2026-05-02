@@ -55,6 +55,10 @@ export function normalizeCandidateV1(params: {
   const amountParsed = parseAmountLoose(candidate.amountRaw);
   const descriptionNormalized = normalizeDescription(candidate.descriptionRaw);
 
+  const isUnmappedDocument =
+    candidate.transactionCode === "UNMAPPED_TEXT" ||
+    candidate.metadata?.note === "unmapped_text_document";
+
   const ctx: RuleContext = {
     accountType: params.accountType,
     signConvention: params.signConvention,
@@ -76,13 +80,15 @@ export function normalizeCandidateV1(params: {
     kind: classified.kind,
   });
 
-  const needsReview = amountParsed === null || descriptionNormalized.length === 0;
+  const needsReview =
+    amountParsed === null || descriptionNormalized.length === 0 || isUnmappedDocument;
 
   const audit = {
     ruleVersion: LEDGER_RULE_VERSION_V1,
     classified,
     sign: sign.audit,
     amountParsed,
+    ...(isUnmappedDocument ? { unmappedDocument: true as const } : {}),
   };
 
   const fingerprint = fingerprintCandidate({
@@ -101,7 +107,7 @@ export function normalizeCandidateV1(params: {
     amountNormalized: sign.amountNormalized,
     kind: classified.kind,
     affectsIncomeExpense: classified.affectsIncomeExpense,
-    confidence: needsReview ? 0.2 : 0.7,
+    confidence: isUnmappedDocument ? 0.05 : needsReview ? 0.2 : 0.7,
     needsReview,
     audit,
     fingerprint,

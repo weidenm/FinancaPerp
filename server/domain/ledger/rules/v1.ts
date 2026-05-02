@@ -36,18 +36,21 @@ export function classifyKindV1(ctx: RuleContext, s: RuleSignals): { kind: Ledger
     d.includes("PAGAMENTO CARTAO") ||
     d.includes("PAGAMENTO CARTÃO") ||
     d.includes("CARD PAYMENT") ||
-    code.includes("PAYMENT");
+    code === "PAYMENT";
 
   if (isInvoicePayment) return { kind: "transfer", affectsIncomeExpense: false };
 
-  const isTransfer =
-    d.includes("TRANSFER") ||
-    d.includes("PIX") ||
-    d.includes("TED") ||
-    d.includes("DOC") ||
-    code.includes("TRANSFER");
+  // Internal movements between own accounts only. PIX/TED/DOC on statements are usually
+  // payments to third parties and must flow to P&L (receita/despesa) unless clearly internal.
+  const isInternalTransfer =
+    code === "XFER" ||
+    d.includes("TRANSFERENCIA ENTRE CONTAS") ||
+    d.includes("TRANSFERÊNCIA ENTRE CONTAS") ||
+    d.includes("TRANSFERENCIA ENTRE CC") ||
+    d.includes("TRANSFERÊNCIA ENTRE CC") ||
+    (d.includes("TRANSFER") && d.includes("MESMA TITULAR"));
 
-  if (isTransfer) return { kind: "transfer", affectsIncomeExpense: false };
+  if (isInternalTransfer) return { kind: "transfer", affectsIncomeExpense: false };
 
   // For credit cards, default to purchase unless clearly something else.
   if (ctx.accountType === "credit_card") return { kind: "purchase", affectsIncomeExpense: true };

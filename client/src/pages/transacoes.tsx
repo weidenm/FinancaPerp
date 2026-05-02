@@ -186,9 +186,16 @@ export default function Transacoes() {
       const data = (await res.json()) as {
         importId?: number;
         counts?: { raw?: number; ledger?: number; needsReview?: number };
+        warnings?: string[];
+        autoCommitRecommended?: boolean;
       };
       const importId = data.importId;
       if (importId == null) throw new Error("Resposta inválida do servidor (sem importId).");
+
+      if (data.autoCommitRecommended === false) {
+        return { import: data, commit: { skipped: true as const, created: 0 } };
+      }
+
       const commitRes = await apiRequest("POST", `/api/imports/${importId}/commit`);
       const commit = (await commitRes.json()) as {
         created?: number;
@@ -203,19 +210,32 @@ export default function Transacoes() {
       const raw = data?.counts?.raw ?? 0;
       const ledger = data?.counts?.ledger ?? 0;
       const needsReview = data?.counts?.needsReview ?? 0;
-      const created = commit?.created ?? 0;
-      const already = commit?.alreadyCommitted === true;
+      const warnings = data?.warnings ?? [];
+      const skipped = commit && "skipped" in commit && commit.skipped === true;
+      const created = skipped ? 0 : (commit?.created ?? 0);
+      const already =
+        !skipped && "alreadyCommitted" in commit && commit.alreadyCommitted === true;
       toast({
-        title: already ? "Importação já processada" : "Importação concluída",
+        title: skipped
+          ? "Importação registrada (sem gravar na lista)"
+          : already
+            ? "Importação já processada"
+            : "Importação concluída",
         description: [
-          `Linhas no arquivo: ${raw} · Normalizadas: ${ledger}`,
-          needsReview ? `Com alerta de revisão: ${needsReview}` : null,
-          already
+          skipped
+            ? `ID do import: ${data.importId}. Nenhum lançamento tabular detectado — commit automático desativado.`
+            : `Linhas no arquivo: ${raw} · Normalizadas: ${ledger}`,
+          needsReview && !skipped ? `Com alerta de revisão: ${needsReview}` : null,
+          skipped ? null : already
             ? "Lançamentos já estavam gravados na lista."
             : `Novas transações na lista: ${created} (use o mês da data de cada lançamento para vê-las).`,
+          warnings.length ? warnings[0] : null,
+          data.importId != null
+            ? `Revise o ledger em Importações → lote #${data.importId} antes de confiar nos totais.`
+            : null,
         ]
           .filter(Boolean)
-          .join(" · "),
+          .join(" "),
       });
     },
     onError: (e: any) => {
