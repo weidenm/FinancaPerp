@@ -21,12 +21,19 @@ async function extractPdf(buffer: Buffer): Promise<string> {
   return data.text || "";
 }
 
+/** Prefer UTF-8; if replacement chars appear (invalid UTF-8), fall back to Latin-1 (common for BR CSV/OFX exports). */
+function decodeTextBuffer(buffer: Buffer): string {
+  const utf8 = buffer.toString("utf-8");
+  if (!utf8.includes("\uFFFD")) return utf8;
+  return buffer.toString("latin1");
+}
+
 function extractCsv(buffer: Buffer): string {
-  return buffer.toString("utf-8");
+  return decodeTextBuffer(buffer);
 }
 
 function extractTxt(buffer: Buffer): string {
-  return buffer.toString("utf-8");
+  return decodeTextBuffer(buffer);
 }
 
 function extractXlsx(buffer: Buffer): Record<string, unknown>[] {
@@ -69,7 +76,7 @@ export async function parseUploadToRawDocuments(files: Express.Multer.File[]): P
     }
 
     if (lower.endsWith(".ofx") || mimetype === "application/x-ofx" || mimetype === "application/octet-stream") {
-      docs.push({ source: "ofx", originalName: name, rawText: file.buffer.toString("utf-8") });
+      docs.push({ source: "ofx", originalName: name, rawText: decodeTextBuffer(file.buffer) });
       continue;
     }
 

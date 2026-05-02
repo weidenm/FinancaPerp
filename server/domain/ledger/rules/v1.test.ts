@@ -30,14 +30,29 @@ describe("classifyKindV1", () => {
     expect(r.affectsIncomeExpense).toBe(false);
   });
 
-  it("classifies PIX as transfer", () => {
+  it("classifies PIX as outflow in P&L (not internal transfer)", () => {
     const r = classifyKindV1(baseCtx, { description: "PIX ENVIADO JOAO", metadata: {} });
+    expect(r.kind).toBe("other");
+    expect(r.affectsIncomeExpense).toBe(true);
+  });
+
+  it("classifies TED to third party as P&L", () => {
+    const r = classifyKindV1(baseCtx, { description: "TED PARA BANCO", metadata: {} });
+    expect(r.kind).toBe("other");
+    expect(r.affectsIncomeExpense).toBe(true);
+  });
+
+  it("classifies OFX XFER as internal transfer", () => {
+    const r = classifyKindV1(baseCtx, { description: "MOVIMENTO", transactionCode: "XFER", metadata: {} });
     expect(r.kind).toBe("transfer");
     expect(r.affectsIncomeExpense).toBe(false);
   });
 
-  it("classifies TED as transfer", () => {
-    const r = classifyKindV1(baseCtx, { description: "TED PARA BANCO", metadata: {} });
+  it("classifies transfer between own accounts by description", () => {
+    const r = classifyKindV1(baseCtx, {
+      description: "TRANSFERENCIA ENTRE CONTAS POUPANCA",
+      metadata: {},
+    });
     expect(r.kind).toBe("transfer");
     expect(r.affectsIncomeExpense).toBe(false);
   });

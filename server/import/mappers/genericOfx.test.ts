@@ -83,4 +83,27 @@ describe("mapGenericOfx", () => {
     const rows = mapGenericOfx(makeOfxDoc("<OFX></OFX>"));
     expect(rows).toHaveLength(0);
   });
+
+  it("parses XML-style tags and DTPOSTED with timezone suffix", () => {
+    const xmlOfx = `
+<OFX>
+<BANKMSGSRSV1>
+<STMTRS>
+<STMTTRN>
+  <TRNTYPE>DEBIT</TRNTYPE>
+  <DTPOSTED>20260115120000[-3:BRT]</DTPOSTED>
+  <TRNAMT>-99,50</TRNAMT>
+  <FITID>XML-001</FITID>
+  <NAME>LOJA XML</NAME>
+</STMTTRN>
+</STMTRS>
+</BANKMSGSRSV1>
+</OFX>`;
+    const rows = mapGenericOfx(makeOfxDoc(xmlOfx));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].postedAt).toBe("2026-01-15");
+    expect(rows[0].amountRaw).toBe("-99,50");
+    expect(rows[0].transactionCode).toBe("DEBIT");
+    expect(rows[0].externalId).toBe("XML-001");
+  });
 });

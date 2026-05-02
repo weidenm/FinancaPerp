@@ -35,8 +35,12 @@ Body exemplo:
 ```
 
 #### Importação
+
+Documentação detalhada: [docs/importacao.md](docs/importacao.md) (formatos, encoding, `warnings`, commit automático).
+
 - `POST /api/imports` (multipart `files[]`)
   - campos: `accountId`, `connectorId`, `sourceKind` (`statement|card_invoice`), `ruleVersion?`
+  - resposta inclui `warnings[]` e `autoCommitRecommended`; PDF/TXT/imagem só-texto não recomendam commit até haver CSV/XLSX/OFX ou revisão futura
 - `GET /api/imports`
 - `GET /api/imports/:id`
 - `GET /api/imports/:id/files`
@@ -47,7 +51,10 @@ Body exemplo:
 - `POST /api/imports/:id/commit` (projeta para `transactions` apenas quando `affects_income_expense=true`)
 
 ### UI
-Na tela `Transações`, existe o botão **Importar** que chama `POST /api/imports` via `FormData`.
+- **Transações**: botão **Importar** (`POST /api/imports` via `FormData`).
+- **Importações** (`#/importacoes`): revisão do ledger por lote, edição de tipo/fluxo R&D, reprocessar e commit.
+
+`GET /api/imports` devolve também `accountName` para cada lote.
 
 ### Desenvolvimento
 Criar schema no SQLite:

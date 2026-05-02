@@ -4,6 +4,7 @@ import multer from "multer";
 import { z } from "zod";
 import { parseUploadToRawDocuments } from "../import/parser";
 import { mapDocumentsToCandidates } from "../import/mappers";
+import { buildImportPreviewMeta } from "../import/importPreview";
 import { normalizeCandidatesV1 } from "../domain/ledger/pipeline";
 import { pickDuplicatesByFingerprint } from "../domain/ledger/dedupe";
 import {
@@ -21,6 +22,7 @@ import {
   insertRawTransactions,
   listImportFiles,
   listImports,
+  listAccounts,
   listLedgerTransactions,
   listRawTransactions,
   markImportStatus,
@@ -48,7 +50,15 @@ const createImportBodySchema = z.object({
 
 export function registerImportRoutes(app: Express) {
   app.get("/api/imports", async (_req, res) => {
-    res.json(await listImports());
+    const rows = await listImports();
+    const accs = await listAccounts();
+    const accountNameById = new Map(accs.map((a) => [a.id, a.name]));
+    res.json(
+      rows.map((r) => ({
+        ...r,
+        accountName: accountNameById.get(r.accountId) ?? `Conta #${r.accountId}`,
+      })),
+    );
   });
 
   app.get("/api/imports/:id", async (req, res) => {
@@ -103,15 +113,30 @@ export function registerImportRoutes(app: Express) {
     const existing = await findImportByIdempotencyKey(idempotencyKey);
     if (existing) {
       const ledger = await listLedgerTransactions(existing.id, { includeDuplicates: true });
+      const raws = await listRawTransactions(existing.id);
+      const preview = buildImportPreviewMeta(
+        raws.map((r) => ({
+          externalId: r.externalId,
+          postedAt: r.postedAt,
+          descriptionRaw: r.descriptionRaw,
+          transactionCode: r.transactionCode,
+          amountRaw: r.amountRaw,
+          amountRawSignHint: r.amountRawSignHint as any,
+          metadata: JSON.parse(r.metadataJson || "{}"),
+        })),
+      );
       return res.json({
         importId: existing.id,
         status: existing.status,
         idempotencyKey,
         counts: {
+          raw: raws.length,
           ledger: ledger.length,
           duplicates: ledger.filter((t) => t.duplicateOfId != null).length,
           needsReview: ledger.filter((t) => t.needsReview).length,
         },
+        warnings: preview.warnings,
+        autoCommitRecommended: preview.autoCommitRecommended,
       });
     }
 
@@ -137,6 +162,7 @@ export function registerImportRoutes(app: Express) {
 
     const docs = await parseUploadToRawDocuments(files);
     const candidates = mapDocumentsToCandidates({ connectorId, docs });
+    const preview = buildImportPreviewMeta(candidates);
 
     const rawRows = candidates.map((c) => ({
       importId: importRow.id,
@@ -210,6 +236,8 @@ export function registerImportRoutes(app: Express) {
         duplicates: ledgerAll.filter((t) => t.duplicateOfId != null).length,
         needsReview: needsReviewCount,
       },
+      warnings: preview.warnings,
+      autoCommitRecommended: preview.autoCommitRecommended,
     });
   });
 
@@ -294,6 +322,8 @@ export function registerImportRoutes(app: Express) {
       diffJson: JSON.stringify({ ruleVersion }),
     });
 
+    const preview = buildImportPreviewMeta(candidates);
+
     res.json({
       importId,
       status: needsReviewCount > 0 ? "needs_review" : "parsed",
@@ -303,6 +333,8 @@ export function registerImportRoutes(app: Express) {
         duplicates: ledgerAll.filter((t) => t.duplicateOfId != null).length,
         needsReview: needsReviewCount,
       },
+      warnings: preview.warnings,
+      autoCommitRecommended: preview.autoCommitRecommended,
     });
   });
 
